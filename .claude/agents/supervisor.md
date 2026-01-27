@@ -31,6 +31,11 @@ tools:
   - Bash(uv sync:*)
   - Bash(npm install:*)
   - Bash(pip install:*)
+  # monitoring window (macOS)
+  - Bash(osascript:*)
+  - Bash(watch:*)
+  - Bash(tail:*)
+  - Bash(echo:*)
 model: sonnet
 ---
 
@@ -97,9 +102,6 @@ python3 ~/.claude/orchestrator_code/verify.py full <task-id> tasks.yaml --env-ha
 ## Stage 0: Initialize
 
 ```bash
-# Launch dashboard in a separate tmux session (auto-opens for monitoring)
-tmux new-session -d -s "orchestrator-dashboard" "python3 ~/.claude/orchestrator_code/dashboard.py"
-
 # Read and validate the execution plan
 cat tasks.yaml
 
@@ -107,10 +109,40 @@ cat tasks.yaml
 python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
 ```
 
-**Note:** The dashboard runs in tmux session `orchestrator-dashboard`. To view it:
+### Launch Monitoring Windows (3 Tabs)
+
+After validation, open 3 terminal windows automatically:
+
 ```bash
-tmux attach -t orchestrator-dashboard
-# Ctrl-b d to detach
+# TAB 1: Main agent (supervisor) - ALREADY RUNNING (this terminal)
+
+# TAB 2: Dashboard window
+tmux new-session -d -s "orchestrator-dashboard"
+tmux send-keys -t "orchestrator-dashboard" "cd '$(pwd)' && python3 ~/.claude/orchestrator_code/dashboard.py" Enter
+osascript -e 'tell application "Terminal" to do script "tmux attach -t orchestrator-dashboard"'
+
+# TAB 3: Workers window (will show split panes for each worker)
+tmux new-session -d -s "orchestrator-workers"
+tmux send-keys -t "orchestrator-workers" "echo 'Waiting for workers to spawn...'; sleep infinity" Enter
+osascript -e 'tell application "Terminal" to do script "tmux attach -t orchestrator-workers"'
+```
+
+**For iTerm2 users**, replace osascript lines with:
+```bash
+osascript -e 'tell application "iTerm" to create window with default profile command "tmux attach -t orchestrator-dashboard"'
+osascript -e 'tell application "iTerm" to create window with default profile command "tmux attach -t orchestrator-workers"'
+```
+
+This creates 3 visible windows:
+```
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  TAB 1: MAIN    │  │  TAB 2: DASH    │  │  TAB 3: WORKERS │
+│                 │  │                 │  │ ┌─────┬───────┐ │
+│  Supervisor     │  │  Live status    │  │ │wkr-a│ wkr-b │ │
+│  Claude Code    │  │  table with     │  │ ├─────┼───────┤ │
+│  running here   │  │  context info   │  │ │wkr-c│ wkr-d │ │
+│                 │  │                 │  │ └─────┴───────┘ │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
 Validate:
@@ -197,6 +229,42 @@ tmux new-session -d -s "worker-task-c" -c ".worktrees/task-c"
 tmux send-keys -t "worker-task-a" "claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
 tmux send-keys -t "worker-task-b" "claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
 tmux send-keys -t "worker-task-c" "claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
+```
+
+### Setup Worker Panes in Workers Window
+
+After spawning worker sessions, create split panes in the workers window to view each:
+
+```bash
+# Kill the placeholder in workers window
+tmux send-keys -t "orchestrator-workers" C-c
+
+# First worker pane - show live output from worker-task-a
+tmux send-keys -t "orchestrator-workers" "watch -n1 'tmux capture-pane -t worker-task-a -p -S -30 2>/dev/null || echo [task-a completed]'" Enter
+
+# Split and add second worker
+tmux split-window -t "orchestrator-workers" -h
+tmux send-keys -t "orchestrator-workers" "watch -n1 'tmux capture-pane -t worker-task-b -p -S -30 2>/dev/null || echo [task-b completed]'" Enter
+
+# Split and add third worker (if exists)
+tmux split-window -t "orchestrator-workers" -v
+tmux send-keys -t "orchestrator-workers" "watch -n1 'tmux capture-pane -t worker-task-c -p -S -30 2>/dev/null || echo [task-c completed]'" Enter
+
+# Balance the panes
+tmux select-layout -t "orchestrator-workers" tiled
+```
+
+The workers window now shows:
+```
+┌─────────────────────────────────────────────┐
+│  orchestrator-workers                       │
+├─────────────────────┬───────────────────────┤
+│  worker-task-a      │  worker-task-b        │
+│  (live output)      │  (live output)        │
+├─────────────────────┼───────────────────────┤
+│  worker-task-c      │  worker-task-d        │
+│  (live output)      │  (live output)        │
+└─────────────────────┴───────────────────────┘
 ```
 
 ## Stage 3: Monitor Progress
@@ -354,16 +422,17 @@ cleanup_worktrees() {
   fi
 }
 
-# Cleanup dashboard session
-cleanup_dashboard() {
+# Cleanup monitoring sessions (dashboard + workers window)
+cleanup_monitoring() {
   tmux kill-session -t "orchestrator-dashboard" 2>/dev/null || true
+  tmux kill-session -t "orchestrator-workers" 2>/dev/null || true
 }
 
 # Full cleanup (run at end of orchestration)
 full_cleanup() {
   cleanup_workers
   cleanup_worktrees
-  cleanup_dashboard
+  cleanup_monitoring
   echo "Cleanup complete"
 }
 ```
@@ -381,8 +450,9 @@ full_cleanup() {
 # Kill all worker sessions (one-liner)
 tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^worker-' | xargs -I {} tmux kill-session -t {} 2>/dev/null
 
-# Kill dashboard session
+# Kill monitoring sessions
 tmux kill-session -t "orchestrator-dashboard" 2>/dev/null
+tmux kill-session -t "orchestrator-workers" 2>/dev/null
 
 # List any remaining worker sessions
 tmux list-sessions 2>/dev/null | grep 'worker-' || echo "No worker sessions found"
@@ -390,8 +460,9 @@ tmux list-sessions 2>/dev/null | grep 'worker-' || echo "No worker sessions foun
 # List any remaining worktrees
 git worktree list | grep '.worktrees/' || echo "No orchestration worktrees found"
 
-# View dashboard (if running)
-tmux attach -t "orchestrator-dashboard"  # Ctrl-b d to detach
+# View windows (if running)
+tmux attach -t "orchestrator-dashboard"  # Dashboard
+tmux attach -t "orchestrator-workers"    # Worker output
 ```
 
 ## Error Handling
