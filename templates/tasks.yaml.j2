@@ -1,0 +1,96 @@
+# Execution Plan
+# Generated: {{ created_at }}
+# Request: {{ request }}
+
+request: "{{ request }}"
+created_at: "{{ created_at }}"
+
+tasks:
+{% for task in tasks %}
+  - id: {{ task.id }}
+    description: "{{ task.description }}"
+
+    files_write:
+{% for file in task.files_write %}
+      - "{{ file }}"
+{% endfor %}
+{% if task.files_read %}
+
+    files_read:
+{% for file in task.files_read %}
+      - "{{ file }}"
+{% endfor %}
+{% endif %}
+{% if task.resources_write %}
+
+    resources_write:
+{% for resource in task.resources_write %}
+      - "{{ resource }}"
+{% endfor %}
+{% endif %}
+{% if task.depends_on %}
+
+    depends_on:
+{% for dep in task.depends_on %}
+      - {{ dep }}
+{% endfor %}
+{% else %}
+
+    depends_on: []
+{% endif %}
+
+    verification:
+{% for check in task.verification %}
+      - command: "{{ check.command }}"
+        type: {{ check.type }}
+        required: {{ check.required | lower }}
+{% if check.description %}
+        description: "{{ check.description }}"
+{% endif %}
+{% endfor %}
+{% if task.patch_intents %}
+
+    patch_intents:
+{% for intent in task.patch_intents %}
+      - file: "{{ intent.file }}"
+        action: "{{ intent.action }}"
+        intent:
+{% for key, value in intent.intent.items() %}
+          {{ key }}: {{ value | tojson }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% if task.allow_large_changes %}
+
+    allow_large_changes: true
+{% endif %}
+
+{% endfor %}
+{% if contracts %}
+contracts:
+{% for contract in contracts %}
+  - name: "{{ contract.name }}"
+    version: "{{ contract.version }}"
+    file_path: "{{ contract.file_path }}"
+    methods:
+{% for method in contract.methods %}
+      - "{{ method }}"
+{% endfor %}
+{% if contract.consumers %}
+    consumers:
+{% for consumer in contract.consumers %}
+      - {{ consumer }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+# Risk Assessment
+# Score: {{ risk_score }}
+# Auto-approve: {{ auto_approve | lower }}
+{% if risk_factors %}
+# Factors:
+{% for factor in risk_factors %}
+#   - {{ factor }}
+{% endfor %}
+{% endif %}
