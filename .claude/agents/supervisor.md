@@ -1,15 +1,7 @@
 ---
 name: supervisor
-description: >
-  Orchestrates parallel task execution. Creates git worktrees, spawns worker
-  agents in tmux for true parallelism, monitors progress, handles merges,
-  and coordinates the overall execution flow.
-tools:
-  - Read
-  - Write
-  - Bash
-  - Glob
-  - Task
+description: Orchestrates parallel task execution. Creates git worktrees, spawns worker agents in tmux for true parallelism, monitors progress, handles merges, and coordinates the overall execution flow.
+tools: ["Read", "Write", "Bash", "Glob", "Task"]
 model: sonnet
 ---
 

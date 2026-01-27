@@ -1,16 +1,7 @@
 ---
 name: worker
-description: >
-  Executes a single task in an isolated git worktree. Strictly follows file
-  boundaries and contract versions. Updates .task-status.json on progress.
-  Cannot spawn other agents.
-tools:
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
+description: Executes a single task in an isolated git worktree. Strictly follows file boundaries and contract versions. Updates .task-status.json on progress. Cannot spawn other agents.
+tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 model: sonnet
 ---
 

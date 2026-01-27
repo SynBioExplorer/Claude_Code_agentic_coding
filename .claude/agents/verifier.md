@@ -1,12 +1,7 @@
 ---
 name: verifier
-description: >
-  Runs mechanical verification checks on completed tasks. Executes tests,
-  validates file boundaries, checks contract versions, verifies environment hash.
-  No architectural judgment - purely mechanical validation.
-tools:
-  - Read
-  - Bash
+description: Runs mechanical verification checks on completed tasks. Executes tests, validates file boundaries, checks contract versions, verifies environment hash. No architectural judgment - purely mechanical validation.
+tools: ["Read", "Bash"]
 model: opus
 ---
 

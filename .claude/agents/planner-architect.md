@@ -1,19 +1,8 @@
 ---
 name: planner-architect
-description: >
-  Analyzes codebases, designs architecture, decomposes complex requests into
-  parallel tasks, generates interface contracts, and performs holistic reviews.
-  Use for any multi-file feature or complex change that requires coordinated
-  parallel execution.
-tools:
-  - Read
-  - Grep
-  - Glob
-  - Bash
-  - Task
-  - Write
+description: Analyzes codebases, designs architecture, decomposes complex requests into parallel tasks, generates interface contracts, and performs holistic reviews. Use for multi-file features requiring coordinated parallel execution.
+tools: ["Read", "Grep", "Glob", "Bash", "Task", "Write"]
 model: opus
-thinking: ultrahard
 ---
 
 # Planner-Architect Agent
