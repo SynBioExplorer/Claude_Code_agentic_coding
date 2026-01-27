@@ -41,9 +41,10 @@ python3 ~/.claude/orchestrator_code/environment.py
 ### 3. Requirements
 
 - **Claude Code CLI** - The main Claude Code application
-- **Git** - For worktree management
+- **Git** - For worktree management (must be initialized in project)
 - **tmux** - For parallel worker execution
 - **Python 3.10+** - For orchestrator utilities
+- **rich** - `pip install rich` for live dashboard
 - **PyYAML** (optional) - `pip install pyyaml` for YAML parsing
 
 ## Usage
@@ -116,6 +117,27 @@ python3 ~/.claude/orchestrator_code/dashboard.py --once
 
 Requires `rich` library: `pip install rich`
 
+### Auto-Opening Monitoring Windows
+
+When orchestration starts, 3 terminal windows open automatically (macOS):
+
+```
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  MAIN AGENT     │  │   DASHBOARD     │  │    WORKERS      │
+│                 │  │                 │  │ ┌─────┬───────┐ │
+│  Supervisor/    │  │ Task   Status   │  │ │wkr-a│ wkr-b │ │
+│  Planner runs   │  │ task-a ●running │  │ ├─────┼───────┤ │
+│  here           │  │ task-b ○pending │  │ │wkr-c│ wkr-d │ │
+│                 │  │                 │  │ └─────┴───────┘ │
+│  (your current  │  │ Ctx: 45k/200k   │  │  live output    │
+│   terminal)     │  │                 │  │  from workers   │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+```
+
+- **Main**: Your Claude Code session (supervisor/planner-architect)
+- **Dashboard**: Live status table with context window usage per worker
+- **Workers**: Split panes showing real-time output from each worker
+
 ## How It Works
 
 ### 1. Planning Phase
@@ -130,6 +152,7 @@ The planner-architect:
 ### 2. Execution Phase
 
 The supervisor:
+- Opens monitoring windows (Dashboard + Workers view)
 - Creates isolated git worktrees (`.worktrees/<task-id>/`)
 - Spawns worker agents in tmux sessions for true parallelism
 - Monitors progress via `.task-status.json` files
@@ -256,6 +279,17 @@ your-project/
 python3 ~/.claude/orchestrator_code/state.py status
 ```
 
+### View monitoring windows
+```bash
+# Dashboard window
+tmux attach -t "orchestrator-dashboard"
+
+# Workers window
+tmux attach -t "orchestrator-workers"
+
+# Detach with Ctrl-b d
+```
+
 ### List tmux worker sessions
 ```bash
 tmux list-sessions | grep "worker-"
@@ -276,6 +310,16 @@ tmux kill-session -t "worker-<task-id>"
 ```bash
 git worktree list
 git worktree remove .worktrees/<task-id>
+```
+
+### Kill all orchestration sessions
+```bash
+# Kill monitoring windows
+tmux kill-session -t "orchestrator-dashboard" 2>/dev/null
+tmux kill-session -t "orchestrator-workers" 2>/dev/null
+
+# Kill all worker sessions
+tmux list-sessions -F '#{session_name}' | grep '^worker-' | xargs -I {} tmux kill-session -t {}
 ```
 
 ## License
