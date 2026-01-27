@@ -1,7 +1,24 @@
 ---
 name: planner-architect
 description: Analyzes codebases, designs architecture, decomposes complex requests into parallel tasks, generates interface contracts, and performs holistic reviews. Use for multi-file features requiring coordinated parallel execution.
-tools: ["Read", "Grep", "Glob", "Bash", "Task", "Write"]
+tools:
+  - Read
+  - Write
+  - Grep
+  - Glob
+  - Task
+  # git commands (analyze repo)
+  - Bash(git status:*)
+  - Bash(git log:*)
+  - Bash(git diff:*)
+  - Bash(git rev-parse:*)
+  # orchestrator utilities
+  - Bash(python3 ~/.claude/orchestrator_code:*)
+  # file operations
+  - Bash(cat:*)
+  - Bash(ls:*)
+  - Bash(tree:*)
+  - Bash(mkdir:*)
 model: opus
 ---
 

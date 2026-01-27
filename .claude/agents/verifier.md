@@ -1,7 +1,27 @@
 ---
 name: verifier
 description: Runs mechanical verification checks on completed tasks. Executes tests, validates file boundaries, checks contract versions, verifies environment hash. No architectural judgment - purely mechanical validation.
-tools: ["Read", "Bash"]
+tools:
+  - Read
+  - Glob
+  - Grep
+  # git commands (check diffs, status)
+  - Bash(git diff:*)
+  - Bash(git status:*)
+  - Bash(git log:*)
+  # orchestrator utilities
+  - Bash(python3 ~/.claude/orchestrator_code:*)
+  # test runners
+  - Bash(pytest:*)
+  - Bash(python3 -m pytest:*)
+  - Bash(npm test:*)
+  - Bash(npm run test:*)
+  - Bash(npm run lint:*)
+  - Bash(cargo test:*)
+  - Bash(go test:*)
+  # file reading
+  - Bash(cat:*)
+  - Bash(ls:*)
 model: opus
 ---
 
