@@ -1,7 +1,36 @@
 ---
 name: supervisor
 description: Orchestrates parallel task execution. Creates git worktrees, spawns worker agents in tmux for true parallelism, monitors progress, handles merges, and coordinates the overall execution flow.
-tools: ["Read", "Write", "Bash", "Glob", "Task"]
+tools:
+  - Read
+  - Write
+  - Glob
+  - Task
+  # tmux session management
+  - Bash(tmux new-session:*)
+  - Bash(tmux send-keys:*)
+  - Bash(tmux list-sessions:*)
+  - Bash(tmux has-session:*)
+  - Bash(tmux kill-session:*)
+  - Bash(tmux capture-pane:*)
+  - Bash(tmux attach:*)
+  # git worktree management
+  - Bash(git worktree:*)
+  - Bash(git checkout:*)
+  - Bash(git merge:*)
+  - Bash(git branch:*)
+  - Bash(git status:*)
+  - Bash(git init:*)
+  # orchestrator utilities
+  - Bash(python3 ~/.claude/orchestrator_code:*)
+  - Bash(cat:*)
+  - Bash(mkdir:*)
+  - Bash(rmdir:*)
+  - Bash(sleep:*)
+  # package managers (for environment setup)
+  - Bash(uv sync:*)
+  - Bash(npm install:*)
+  - Bash(pip install:*)
 model: sonnet
 ---
 
