@@ -56,6 +56,96 @@ def get_tmux_sessions() -> dict:
         return {}
 
 
+def get_tmux_pane_content(session_name: str, lines: int = 50) -> str:
+    """Capture recent output from a tmux session."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", session_name, "-p", "-S", f"-{lines}"],
+            capture_output=True, text=True
+        )
+        return result.stdout if result.returncode == 0 else ""
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def parse_context_usage(pane_content: str) -> tuple:
+    """Parse context window usage from Claude CLI output.
+
+    Returns (used, total, percentage) or (None, None, None) if not found.
+    """
+    import re
+
+    # Look for patterns like:
+    # "12.5k/200k" or "12500/200000" or "Context: 12.5k / 200k"
+    # The Claude CLI shows context in the status area
+
+    patterns = [
+        # Pattern: "45.2k / 200k" or "45.2k/200k"
+        r'(\d+(?:\.\d+)?k?)\s*/\s*(\d+(?:\.\d+)?k)',
+        # Pattern: "Context: 45200 / 200000"
+        r'[Cc]ontext[:\s]+(\d+(?:\.\d+)?k?)\s*/\s*(\d+(?:\.\d+)?k?)',
+        # Pattern with tokens label
+        r'(\d+(?:\.\d+)?k?)\s*(?:tokens?\s*)?/\s*(\d+(?:\.\d+)?k?)\s*(?:tokens?)?',
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, pane_content)
+        if matches:
+            # Take the last match (most recent)
+            used_str, total_str = matches[-1]
+
+            def parse_k(s):
+                s = s.lower().strip()
+                if s.endswith('k'):
+                    return float(s[:-1]) * 1000
+                return float(s)
+
+            try:
+                used = parse_k(used_str)
+                total = parse_k(total_str)
+                pct = (used / total * 100) if total > 0 else 0
+                return used, total, pct
+            except (ValueError, ZeroDivisionError):
+                continue
+
+    return None, None, None
+
+
+def format_context(used, total, pct) -> Text:
+    """Format context usage with color coding."""
+    if used is None:
+        return Text("-", style="dim")
+
+    # Format as "45k/200k (23%)"
+    def fmt(n):
+        if n >= 1000:
+            return f"{n/1000:.1f}k"
+        return str(int(n))
+
+    # Color based on usage percentage
+    if pct >= 80:
+        color = "red"
+    elif pct >= 60:
+        color = "yellow"
+    else:
+        color = "green"
+
+    text = Text()
+    text.append(f"{fmt(used)}", style=color)
+    text.append(f"/{fmt(total)}", style="dim")
+    text.append(f" ({pct:.0f}%)", style=color)
+    return text
+
+
+def get_session_context(task_id: str) -> tuple:
+    """Get context usage for a worker session."""
+    session_name = f"worker-{task_id}"
+    content = get_tmux_pane_content(session_name)
+    if content:
+        return parse_context_usage(content)
+    return None, None, None
+
+
 def load_orchestration_state() -> dict:
     """Load main orchestration state."""
     state_file = Path(".orchestration-state.json")
@@ -249,9 +339,10 @@ def build_simple_dashboard() -> Table:
         border_style="cyan",
     )
 
-    table.add_column("Task", style="cyan", width=18)
+    table.add_column("Task", style="cyan", width=16)
     table.add_column("Status", width=12)
-    table.add_column("Agent", width=10)
+    table.add_column("Agent", width=8)
+    table.add_column("Context", width=16)
     table.add_column("Progress")
 
     # Get info
@@ -261,9 +352,11 @@ def build_simple_dashboard() -> Table:
     tasks = state.get("tasks", {})
 
     counts = {"active": 0, "verified": 0, "failed": 0, "pending": 0}
+    total_context_used = 0
+    total_context_max = 0
 
     if not tasks:
-        table.add_row("-", Text("○ idle", style="dim"), "-", "No active orchestration")
+        table.add_row("-", Text("○ idle", style="dim"), "-", Text("-", style="dim"), "No active orchestration")
     else:
         for task_id, task_info in tasks.items():
             status = task_info.get("status", "pending")
@@ -277,7 +370,7 @@ def build_simple_dashboard() -> Table:
                 agent = "worker"
                 status = "executing"
             elif status in ("verified", "merged"):
-                agent = "verified"
+                agent = "done"
             elif status == "pending":
                 agent = "-"
             else:
@@ -296,9 +389,30 @@ def build_simple_dashboard() -> Table:
             status_text = Text(f"{icon} {status}", style=color)
             progress = get_progress_text(task_status)
 
-            table.add_row(task_id[:18], status_text, agent, progress[:40])
+            # Get context usage for active workers
+            if is_tmux_active:
+                used, total, pct = get_session_context(task_id)
+                context_text = format_context(used, total, pct)
+                if used and total:
+                    total_context_used += used
+                    total_context_max += total
+            else:
+                context_text = Text("-", style="dim")
+
+            table.add_row(task_id[:16], status_text, agent, context_text, progress[:35])
 
     # Caption with summary
+    def fmt_k(n):
+        if n >= 1000:
+            return f"{n/1000:.1f}k"
+        return str(int(n))
+
+    context_summary = ""
+    if total_context_max > 0:
+        total_pct = total_context_used / total_context_max * 100
+        ctx_color = "red" if total_pct >= 80 else ("yellow" if total_pct >= 60 else "green")
+        context_summary = f"  │  [{ctx_color}]Ctx: {fmt_k(total_context_used)}/{fmt_k(total_context_max)}[/{ctx_color}]"
+
     table.caption = (
         f"[dim]Request:[/dim] {request}\n"
         f"[dim]Phase:[/dim] [cyan]{phase}[/cyan]  │  "
@@ -306,6 +420,7 @@ def build_simple_dashboard() -> Table:
         f"[yellow]Active: {counts['active']}[/yellow]  │  "
         f"[green]Done: {counts['verified']}[/green]  │  "
         f"[red]Failed: {counts['failed']}[/red]"
+        f"{context_summary}"
     )
 
     return table
