@@ -1,7 +1,8 @@
 ---
 name: orchestrate
 description: Use when the user asks to "orchestrate", "run parallel tasks", "multi-agent execution", "decompose into tasks", or wants to implement complex multi-file features using coordinated agents with git worktrees.
-version: 1.0.0
+version: 1.1.0
+dependencies: rich>=13.0.0
 ---
 
 # Multi-Agent Orchestration
@@ -46,6 +47,7 @@ PLANNER-ARCHITECT (opus)
      │
      ▼
 SUPERVISOR (sonnet)
+├─ Opens 3 monitoring windows (Dashboard, Workers, Main)
 ├─ Create git worktrees (.worktrees/<task-id>/)
 ├─ Spawn workers in tmux sessions
      │
@@ -89,12 +91,33 @@ Every task must have verification commands (tests). The verifier runs them befor
 - `.worktrees/<task-id>/` - Isolated git worktrees (temporary)
 - `.orchestration-state.json` - Execution state
 
+## Live Monitoring (Auto-Opens)
+
+When orchestration starts, 3 terminal windows open automatically:
+
+```
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  MAIN AGENT     │  │   DASHBOARD     │  │    WORKERS      │
+│  Supervisor/    │  │  Live status    │  │ ┌─────┬───────┐ │
+│  Planner runs   │  │  + context      │  │ │wkr-a│ wkr-b │ │
+│  here           │  │  window usage   │  │ ├─────┼───────┤ │
+│                 │  │                 │  │ │wkr-c│ wkr-d │ │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+```
+
+## Prerequisites
+
+- **git** - Must be initialized in project directory
+- **tmux** - For parallel worker sessions
+- **rich** - Python library for dashboard (`pip install rich`)
+
 ## Orchestrator Utilities
 
 Python scripts in `~/.claude/orchestrator_code/`:
 
 | Script | Purpose |
 |--------|---------|
+| `dashboard.py` | Live monitoring with context usage |
 | `risk.py` | Compute risk score |
 | `conflict.py` | Detect file/resource conflicts |
 | `dag.py` | Validate DAG, detect cycles |
