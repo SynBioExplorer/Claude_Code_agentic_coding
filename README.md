@@ -1,322 +1,293 @@
 # Claude Code Multi-Agent Orchestration System
 
-A coordinated multi-agent system for Claude Code that enables parallel task execution with intelligent dependency management, git worktree isolation, and automated review cycles.
+A parallel task execution system for Claude Code that uses git worktrees, DAG-based scheduling, and coordinated agents to implement complex multi-file features.
 
 ## Overview
 
-This system transforms complex multi-file features into coordinated parallel execution with deterministic, conflict-free merging. It uses:
-
-- **Git Worktrees** for physical isolation between workers
-- **DAG-Based Scheduling** for intelligent parallelism
-- **Interface Contracts** for safe cross-task dependencies
-- **Structured Patch Intents** for hot file modifications
-- **Risk-Based Approval Gates** for safe automation
-
-## Architecture
+This system transforms complex requests into coordinated parallel execution:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              USER REQUEST                                    │
-│                     "Add authentication + dashboard"                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          PLANNER-ARCHITECT (opus)                            │
-│  Analyzes codebase → Designs architecture → Generates contracts → Task DAG   │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            SUPERVISOR (sonnet)                               │
-│  Creates worktrees → Spawns workers → Monitors progress → Handles merges     │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                ┌───────────────────┼───────────────────┐
-                ▼                   ▼                   ▼
-┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
-│    WORKER A         │ │    WORKER B         │ │    WORKER C         │
-│  .worktrees/task-a  │ │  .worktrees/task-b  │ │  .worktrees/task-c  │
-└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
-                │                   │                   │
-                └───────────────────┼───────────────────┘
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            VERIFIER (sonnet)                                 │
-│  Runs tests → Checks boundaries → Validates contracts → Reports pass/fail    │
-└─────────────────────────────────────────────────────────────────────────────┘
+User Request
+     │
+     ▼
+┌─────────────────┐
+│ PLANNER-        │  ← Analyzes codebase, creates tasks.yaml + contracts/
+│ ARCHITECT       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   SUPERVISOR    │  ← Creates worktrees, spawns workers in tmux
+└────────┬────────┘
+    ┌────┴────┬────────┐
+    ▼         ▼        ▼
+┌───────┐ ┌───────┐ ┌───────┐
+│WORKER │ │WORKER │ │WORKER │  ← True parallel execution in isolated worktrees
+└───┬───┘ └───┬───┘ └───┬───┘
+    └─────────┴────────┘
+              │
+              ▼
+┌─────────────────┐
+│    VERIFIER     │  ← Tests, boundary checks, contract validation
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ PLANNER-        │  ← Holistic review, accept or iterate (max 3x)
+│ ARCHITECT       │
+└─────────────────┘
 ```
 
 ## Installation
 
+### 1. Copy agents to your global Claude config
+
 ```bash
-# Clone the repository
-git clone <repository-url>
+# Clone this repo (or download the .claude folder)
+git clone https://github.com/SynBioExplorer/Claude_Code_agentic_coding.git
 cd Claude_Code_agentic_coding
 
-# Install with pip
-pip install -e .
+# Copy agents
+cp -r .claude/agents/* ~/.claude/agents/
 
-# Or with uv
-uv pip install -e .
+# Copy orchestrator utilities
+cp -r .claude/orchestrator_code ~/.claude/
+
+# Copy the orchestrate skill
+mkdir -p ~/.claude/skills
+cp .claude/skills/orchestrate.md ~/.claude/skills/
 ```
 
-## Quick Start
-
-### 1. Initialize Configuration
+### 2. Verify installation
 
 ```bash
-claude-orchestrate init
+# Test the utilities work
+python3 ~/.claude/orchestrator_code/contracts.py TestProtocol method1 method2
+python3 ~/.claude/orchestrator_code/environment.py
+
+# Should see no errors
 ```
 
-This creates `.claude-agents.yaml` with default settings.
+### 3. Requirements
 
-### 2. Create an Execution Plan
+- **Claude Code CLI** - The main Claude Code application
+- **Git** - For worktree management
+- **tmux** - For parallel worker execution
+- **Python 3.10+** - For orchestrator utilities
+- **PyYAML** (optional) - `pip install pyyaml` for YAML parsing
 
-```bash
-claude-orchestrate plan "Add user authentication with JWT tokens"
+## Usage
+
+### Quick Start - Use the Skill
+
+In any Claude Code session:
+
+```
+/orchestrate Add user authentication with JWT tokens and refresh flow
 ```
 
-The Planner-Architect will:
-- Analyze your codebase
-- Design the implementation
-- Generate `tasks.yaml` with parallel tasks
-- Create interface contracts in `contracts/`
+This invokes the planner-architect agent which will:
+1. Analyze your codebase
+2. Create `tasks.yaml` with parallel task definitions
+3. Generate interface contracts in `contracts/`
+4. Compute risk score and ask for approval if needed
+5. Spawn the supervisor to execute
 
-### 3. Validate the Plan
+### Manual Invocation
 
-```bash
-claude-orchestrate validate tasks.yaml
+You can also invoke agents directly:
+
+```
+Use the planner-architect agent to design an implementation for:
+Add a REST API for user management with CRUD operations
 ```
 
-This checks for:
-- Valid YAML structure
-- No circular dependencies
-- No file/resource conflicts
-- Risk assessment
+## Agents
 
-### 4. Monitor Progress
+| Agent | Model | Role |
+|-------|-------|------|
+| `planner-architect` | opus | Analyzes codebase, decomposes into parallel tasks, generates contracts, reviews integration |
+| `supervisor` | sonnet | Creates git worktrees, spawns workers in tmux, monitors progress, handles merges |
+| `worker` | sonnet | Executes single task in isolated worktree, respects file boundaries |
+| `verifier` | opus | Runs tests, validates boundaries, checks contracts and environment hash |
 
-```bash
-claude-orchestrate status
-```
+## Orchestrator Utilities
 
-Shows the current orchestration state, task statuses, and any errors.
+Standalone Python scripts in `~/.claude/orchestrator_code/`:
 
-### 5. Clean Up
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `risk.py` | Compute risk score | `python3 ~/.claude/orchestrator_code/risk.py tasks.yaml` |
+| `conflict.py` | Detect file/resource conflicts | `python3 ~/.claude/orchestrator_code/conflict.py tasks.yaml` |
+| `dag.py` | Validate DAG, show execution waves | `python3 ~/.claude/orchestrator_code/dag.py tasks.yaml` |
+| `contracts.py` | Generate Protocol stubs | `python3 ~/.claude/orchestrator_code/contracts.py MyProtocol login logout -o contracts/my.py` |
+| `environment.py` | Compute/verify env hash | `python3 ~/.claude/orchestrator_code/environment.py --verify abc123` |
+| `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py status` |
+| `tasks.py` | Check task readiness | `python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml` |
+| `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
 
-```bash
-claude-orchestrate cleanup
-```
+All scripts support `--json` for machine-readable output.
 
-Removes stale worktrees and tmux sessions.
+## How It Works
 
-## Configuration
+### 1. Planning Phase
 
-### `.claude-agents.yaml`
+The planner-architect:
+- Analyzes your codebase structure and patterns
+- Decomposes the request into independent, parallelizable tasks
+- Assigns file ownership (`files_write`) to prevent conflicts
+- Generates interface contracts for cross-task dependencies
+- Computes risk score for approval gate
+
+### 2. Execution Phase
+
+The supervisor:
+- Creates isolated git worktrees (`.worktrees/<task-id>/`)
+- Spawns worker agents in tmux sessions for true parallelism
+- Monitors progress via `.task-status.json` files
+
+### 3. Verification Phase
+
+The verifier checks each completed task:
+- Runs verification commands (tests, linting)
+- Validates file boundaries
+- Checks contract versions
+- Verifies environment hash
+
+### 4. Integration Phase
+
+After all tasks verified:
+- Supervisor merges task branches to main
+- Planner-architect reviews the integrated result
+- Accept or iterate (max 3 iterations)
+
+## Task Specification Format
 
 ```yaml
-orchestration:
-  planner_model: "opus"
-  supervisor_model: "sonnet"
-  worker_model: "sonnet"
-  verifier_model: "sonnet"
-  max_parallel_workers: 5
-  max_iterations: 3
+request: "Original user request"
+created_at: "2025-01-27T10:00:00Z"
 
-approval:
-  auto_approve_threshold: 25
-  sensitive_patterns:
-    - pattern: "auth|security|crypto"
-      weight: 20
-    - pattern: "payment|billing"
-      weight: 25
+tasks:
+  - id: task-auth-service
+    description: "Implement authentication service"
+    files_write:
+      - "src/services/auth.py"
+      - "tests/test_auth.py"
+    files_read:
+      - "src/models/user.py"
+    resources_write:
+      - "di:AuthService"
+    depends_on: []
+    verification:
+      - command: "pytest tests/test_auth.py"
+        type: test
+        required: true
 
-verification:
-  require_executable_checks: true
-  min_checks_per_task: 1
+  - id: task-auth-routes
+    description: "Add authentication routes"
+    files_write:
+      - "src/routes/auth.py"
+    depends_on: [task-auth-service]  # Must wait for service
+    verification:
+      - command: "pytest tests/test_auth_routes.py"
+        type: test
+        required: true
 
-boundaries:
-  reject_excessive_churn: true
-  churn_threshold_lines: 500
-
-dependencies:
-  verify_env_hash: true
-  ecosystems:
-    python:
-      manager: "uv"
-      lockfile: "uv.lock"
+contracts:
+  - name: "AuthServiceProtocol"
+    version: "abc1234"
+    file_path: "contracts/auth_interface.py"
 ```
 
 ## Key Concepts
 
 ### File & Resource Ownership
 
-Each task declares which files and resources it will modify:
+Each task declares exclusive ownership of files:
+- `files_write` - Files this task will create/modify
+- `resources_write` - Logical resources (routes, DI bindings)
 
-```yaml
-tasks:
-  - id: task-auth
-    files_write:
-      - "src/services/auth.py"
-      - "src/routes/auth.py"
-    resources_write:
-      - "route:/auth"
-      - "di:AuthService"
-```
-
-Conflicts are detected at planning time. Tasks modifying the same file/resource must have explicit dependencies.
+Conflicts are detected at planning time. Overlapping ownership requires explicit `depends_on`.
 
 ### Interface Contracts
 
-For cross-task dependencies, contracts define stable interfaces:
+For cross-task dependencies:
 
 ```python
 # contracts/auth_interface.py
+"""
+Contract: AuthServiceProtocol
+Version: abc1234
+"""
+from typing import Protocol
+
 class AuthServiceProtocol(Protocol):
     def login(self, username: str, password: str) -> dict:
         """Returns {token: str, expires_at: datetime}"""
         ...
 ```
 
-Workers code against these contracts. The Verifier ensures compatibility.
-
-### Structured Patch Intents
-
-For "hot files" (main.py, app.py), workers use structured intents instead of raw edits:
-
-```yaml
-patch_intents:
-  - file: "src/main.py"
-    action: "add_router"
-    intent:
-      router_module: "src.routes.auth"
-      prefix: "/auth"
-```
-
-The framework adapter generates canonical code and routes it to the correct region markers.
-
-### Verification
-
-Every task **must** have verification commands:
-
-```yaml
-verification:
-  - command: "pytest tests/test_auth.py"
-    type: test
-    required: true
-  - command: "ruff check src/services/auth.py"
-    type: lint
-    required: true
-```
-
-The Verifier executes these and also checks:
-- File boundaries respected
-- Contract versions compatible
-- Environment hash matches
+Workers code against contracts. Max 2 renegotiations allowed.
 
 ### Risk Scoring
 
-Plans are scored based on:
-- Sensitive paths (auth, payment, prod)
-- Number of tasks and files
-- New dependencies
-- Contract complexity
-- Test coverage
+| Factor | Weight |
+|--------|--------|
+| Sensitive paths (auth, security, crypto) | +20 |
+| Payment/billing paths | +25 |
+| Prod/deploy paths | +30 |
+| Many tasks (>5) | +5 per extra |
+| Many files (>10) | +3 per extra |
+| New dependencies | +3 per package |
+| Incomplete test coverage | +20 × (1 - coverage) |
 
-Low-risk plans (score < 25) can be auto-approved.
+**Thresholds:**
+- **0-25**: Auto-approve
+- **26-50**: Recommend review
+- **51+**: Require approval
 
-## Agent Definitions
+## Files Created During Orchestration
 
-Custom agents are defined in `.claude/agents/`:
+```
+your-project/
+├── tasks.yaml                    # Execution plan
+├── contracts/                    # Interface Protocol stubs
+│   └── auth_interface.py
+├── .orchestration-state.json     # Execution state
+└── .worktrees/                   # Isolated worktrees (temporary)
+    ├── task-auth-service/
+    │   └── .task-status.json
+    └── task-auth-routes/
+        └── .task-status.json
+```
 
-| Agent | Model | Role |
-|-------|-------|------|
-| `planner-architect` | opus | Analyzes, plans, generates contracts, reviews |
-| `supervisor` | sonnet | Creates worktrees, spawns workers, merges |
-| `worker` | sonnet | Executes tasks in isolated worktrees |
-| `verifier` | sonnet | Runs mechanical verification checks |
+## Troubleshooting
 
-## CLI Commands
-
+### Check orchestration status
 ```bash
-# Initialize configuration
-claude-orchestrate init
-
-# Create execution plan
-claude-orchestrate plan "your request"
-
-# Validate a plan
-claude-orchestrate validate tasks.yaml
-
-# Check status
-claude-orchestrate status
-claude-orchestrate status --verbose
-claude-orchestrate status --json
-
-# List worktrees
-claude-orchestrate worktrees
-
-# Clean up
-claude-orchestrate cleanup
-
-# Abort orchestration
-claude-orchestrate abort
-claude-orchestrate abort --force
+python3 ~/.claude/orchestrator_code/state.py status
 ```
 
-## Development
-
-### Running Tests
-
+### List tmux worker sessions
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=claude_orchestrator
-
-# Run specific test file
-pytest tests/unit/test_dag.py
+tmux list-sessions | grep "worker-"
 ```
 
-### Project Structure
-
+### View worker output
+```bash
+tmux attach -t "worker-<task-id>"
+# Detach with Ctrl-b d
 ```
-src/claude_orchestrator/
-├── cli.py                 # CLI interface
-├── core/
-│   ├── dag.py            # DAG scheduling
-│   ├── conflict.py       # Conflict detection
-│   ├── risk.py           # Risk scoring
-│   ├── state.py          # State machine
-│   ├── contracts.py      # Contract management
-│   └── environment.py    # Environment hashing
-├── worktree/
-│   ├── manager.py        # Worktree operations
-│   └── isolation.py      # Boundary validation
-├── adapters/
-│   ├── base.py           # Adapter protocol
-│   ├── fastapi.py        # FastAPI adapter
-│   ├── express.py        # Express adapter
-│   └── generic.py        # Fallback adapter
-├── integrator/
-│   ├── regions.py        # Region markers
-│   └── merge.py          # Code merging
-├── verification/
-│   ├── runner.py         # Verification execution
-│   ├── boundaries.py     # Boundary checks
-│   └── churn.py          # Churn detection
-├── schemas/
-│   ├── tasks.py          # Task models
-│   ├── status.py         # Status models
-│   └── config.py         # Config models
-└── utils/
-    ├── git.py            # Git operations
-    └── tmux.py           # tmux management
+
+### Kill stuck worker
+```bash
+tmux kill-session -t "worker-<task-id>"
+```
+
+### Clean up worktrees
+```bash
+git worktree list
+git worktree remove .worktrees/<task-id>
 ```
 
 ## License
@@ -326,4 +297,5 @@ MIT
 ## See Also
 
 - [ARCHITECTURE_8.md](ARCHITECTURE_8.md) - Full architecture specification
-- [.claude/agents/](/.claude/agents/) - Agent definitions
+- [.claude/agents/](.claude/agents/) - Agent definitions
+- [.claude/orchestrator_code/](.claude/orchestrator_code/) - Utility scripts
