@@ -6,37 +6,7 @@ A parallel task execution system for Claude Code that uses git worktrees, DAG-ba
 
 This system transforms complex requests into coordinated parallel execution:
 
-```
-User Request
-     │
-     ▼
-┌─────────────────┐
-│ PLANNER-        │  ← Analyzes codebase, creates tasks.yaml + contracts/
-│ ARCHITECT       │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   SUPERVISOR    │  ← Creates worktrees, spawns workers in tmux
-└────────┬────────┘
-    ┌────┴────┬────────┐
-    ▼         ▼        ▼
-┌───────┐ ┌───────┐ ┌───────┐
-│WORKER │ │WORKER │ │WORKER │  ← True parallel execution in isolated worktrees
-└───┬───┘ └───┬───┘ └───┬───┘
-    └─────────┴────────┘
-              │
-              ▼
-┌─────────────────┐
-│    VERIFIER     │  ← Tests, boundary checks, contract validation
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ PLANNER-        │  ← Holistic review, accept or iterate (max 3x)
-│ ARCHITECT       │
-└─────────────────┘
-```
+![Architecture Diagram](architecture.svg)
 
 ## Installation
 

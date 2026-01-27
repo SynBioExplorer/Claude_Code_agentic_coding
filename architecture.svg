@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 750">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="plannerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="supervisorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f093fb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f5576c;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="workerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00f2fe;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="verifierGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#43e97b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#38f9d7;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="utilGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fa709a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#fee140;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Shadow filter -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.2"/>
+    </filter>
+
+    <!-- Arrow marker -->
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555"/>
+    </marker>
+    <marker id="arrowheadWhite" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fff"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="750" fill="#f8fafc"/>
+
+  <!-- Title -->
+  <text x="450" y="40" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="700" fill="#1e293b">Claude Code Multi-Agent Orchestration</text>
+  <text x="450" y="62" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#64748b">Parallel Task Execution with Git Worktrees</text>
+
+  <!-- User Request -->
+  <rect x="375" y="80" width="150" height="40" rx="20" fill="#e2e8f0" filter="url(#shadow)"/>
+  <text x="450" y="105" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#475569">User Request</text>
+
+  <!-- Arrow to Planner -->
+  <line x1="450" y1="120" x2="450" y2="145" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Planner-Architect Box -->
+  <rect x="275" y="150" width="350" height="100" rx="12" fill="url(#plannerGrad)" filter="url(#shadow)"/>
+  <text x="450" y="180" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">PLANNER-ARCHITECT</text>
+  <text x="450" y="200" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">opus model • extended thinking</text>
+  <text x="450" y="220" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Analyze → Decompose → Generate tasks.yaml + contracts/</text>
+  <text x="450" y="238" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Risk Score: 0-25 auto • 26-50 review • 51+ require approval</text>
+
+  <!-- Arrow to Supervisor -->
+  <line x1="450" y1="250" x2="450" y2="280" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Supervisor Box -->
+  <rect x="275" y="285" width="350" height="80" rx="12" fill="url(#supervisorGrad)" filter="url(#shadow)"/>
+  <text x="450" y="315" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">SUPERVISOR</text>
+  <text x="450" y="335" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">sonnet model</text>
+  <text x="450" y="353" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Create worktrees → Spawn tmux sessions → Monitor → Merge</text>
+
+  <!-- Arrows to Workers (fan out) -->
+  <path d="M 350 365 L 350 390 L 200 390 L 200 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 450 365 L 450 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 550 365 L 550 390 L 700 390 L 700 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+
+  <!-- Worker Boxes -->
+  <!-- Worker 1 -->
+  <rect x="115" y="425" width="170" height="95" rx="10" fill="url(#workerGrad)" filter="url(#shadow)"/>
+  <text x="200" y="450" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="white">WORKER</text>
+  <text x="200" y="467" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">sonnet • tmux session</text>
+  <rect x="130" y="478" width="140" height="32" rx="4" fill="rgba(0,0,0,0.15)"/>
+  <text x="200" y="493" text-anchor="middle" font-family="monospace" font-size="9" fill="white">.worktrees/task-a/</text>
+  <text x="200" y="505" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="rgba(255,255,255,0.8)">files_write: [auth.py]</text>
+
+  <!-- Worker 2 -->
+  <rect x="365" y="425" width="170" height="95" rx="10" fill="url(#workerGrad)" filter="url(#shadow)"/>
+  <text x="450" y="450" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="white">WORKER</text>
+  <text x="450" y="467" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">sonnet • tmux session</text>
+  <rect x="380" y="478" width="140" height="32" rx="4" fill="rgba(0,0,0,0.15)"/>
+  <text x="450" y="493" text-anchor="middle" font-family="monospace" font-size="9" fill="white">.worktrees/task-b/</text>
+  <text x="450" y="505" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="rgba(255,255,255,0.8)">files_write: [routes.py]</text>
+
+  <!-- Worker 3 -->
+  <rect x="615" y="425" width="170" height="95" rx="10" fill="url(#workerGrad)" filter="url(#shadow)"/>
+  <text x="700" y="450" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="white">WORKER</text>
+  <text x="700" y="467" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">sonnet • tmux session</text>
+  <rect x="630" y="478" width="140" height="32" rx="4" fill="rgba(0,0,0,0.15)"/>
+  <text x="700" y="493" text-anchor="middle" font-family="monospace" font-size="9" fill="white">.worktrees/task-c/</text>
+  <text x="700" y="505" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="rgba(255,255,255,0.8)">files_write: [tests.py]</text>
+
+  <!-- Parallel execution indicator -->
+  <rect x="320" y="540" width="260" height="22" rx="11" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1"/>
+  <text x="450" y="555" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#0369a1">⚡ TRUE PARALLEL EXECUTION</text>
+
+  <!-- Arrows from Workers (fan in) -->
+  <path d="M 200 520 L 200 550 L 350 550 L 350 575" stroke="#555" stroke-width="2" fill="none"/>
+  <path d="M 450 520 L 450 575" stroke="#555" stroke-width="2" fill="none"/>
+  <path d="M 700 520 L 700 550 L 550 550 L 550 575" stroke="#555" stroke-width="2" fill="none"/>
+  <line x1="450" y1="570" x2="450" y2="590" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Verifier Box -->
+  <rect x="325" y="595" width="250" height="70" rx="10" fill="url(#verifierGrad)" filter="url(#shadow)"/>
+  <text x="450" y="622" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">VERIFIER</text>
+  <text x="450" y="640" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">opus model</text>
+  <text x="450" y="655" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Tests • Boundaries • Contracts • Env Hash</text>
+
+  <!-- Arrow back to Planner for review -->
+  <path d="M 450 665 L 450 690 L 830 690 L 830 200 L 630 200" stroke="#555" stroke-width="2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>
+  <text x="835" y="450" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" transform="rotate(90 835 450)">Review Mode (max 3 iterations)</text>
+
+  <!-- Utilities Panel -->
+  <rect x="30" y="150" width="200" height="180" rx="10" fill="url(#utilGrad)" filter="url(#shadow)"/>
+  <text x="130" y="175" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="white">Orchestrator Utilities</text>
+  <text x="130" y="192" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="rgba(255,255,255,0.85)">~/.claude/orchestrator_code/</text>
+
+  <rect x="45" y="202" width="170" height="115" rx="6" fill="rgba(255,255,255,0.2)"/>
+  <text x="55" y="220" font-family="monospace" font-size="9" fill="white">risk.py</text>
+  <text x="55" y="235" font-family="monospace" font-size="9" fill="white">conflict.py</text>
+  <text x="55" y="250" font-family="monospace" font-size="9" fill="white">dag.py</text>
+  <text x="55" y="265" font-family="monospace" font-size="9" fill="white">contracts.py</text>
+  <text x="55" y="280" font-family="monospace" font-size="9" fill="white">environment.py</text>
+  <text x="55" y="295" font-family="monospace" font-size="9" fill="white">state.py</text>
+  <text x="55" y="310" font-family="monospace" font-size="9" fill="white">tasks.py • verify.py</text>
+
+  <!-- Artifacts Panel -->
+  <rect x="30" y="350" width="200" height="140" rx="10" fill="#334155" filter="url(#shadow)"/>
+  <text x="130" y="375" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="white">Generated Artifacts</text>
+
+  <rect x="45" y="388" width="170" height="90" rx="6" fill="rgba(255,255,255,0.1)"/>
+  <text x="55" y="408" font-family="monospace" font-size="10" fill="#94a3b8">📄 tasks.yaml</text>
+  <text x="55" y="426" font-family="monospace" font-size="10" fill="#94a3b8">📁 contracts/</text>
+  <text x="55" y="444" font-family="monospace" font-size="10" fill="#94a3b8">📁 .worktrees/</text>
+  <text x="55" y="462" font-family="monospace" font-size="10" fill="#94a3b8">📄 .orchestration-state.json</text>
+
+  <!-- Contracts detail -->
+  <rect x="670" y="150" width="200" height="130" rx="10" fill="#1e293b" filter="url(#shadow)"/>
+  <text x="770" y="175" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="white">Interface Contracts</text>
+
+  <rect x="685" y="188" width="170" height="80" rx="6" fill="rgba(255,255,255,0.05)"/>
+  <text x="695" y="207" font-family="monospace" font-size="9" fill="#a5b4fc">class AuthProtocol(Protocol):</text>
+  <text x="695" y="222" font-family="monospace" font-size="9" fill="#94a3b8">    def login(self, ...):</text>
+  <text x="695" y="237" font-family="monospace" font-size="9" fill="#94a3b8">        ...</text>
+  <text x="695" y="257" font-family="monospace" font-size="8" fill="#64748b"># Version: abc1234</text>
+  <text x="695" y="269" font-family="monospace" font-size="8" fill="#64748b"># Max 2 renegotiations</text>
+
+  <!-- Legend -->
+  <rect x="670" y="600" width="200" height="95" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="770" y="620" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#475569">Model Legend</text>
+
+  <circle cx="695" cy="640" r="6" fill="url(#plannerGrad)"/>
+  <text x="710" y="644" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#475569">opus (deep analysis)</text>
+
+  <circle cx="695" cy="660" r="6" fill="url(#workerGrad)"/>
+  <text x="710" y="664" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#475569">sonnet (execution)</text>
+
+  <circle cx="695" cy="680" r="6" fill="url(#verifierGrad)"/>
+  <text x="710" y="684" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#475569">opus (verification)</text>
+
+  <!-- Footer -->
+  <text x="450" y="735" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">File ownership prevents conflicts • DAG scheduling respects dependencies • Max 3 review iterations</text>
+</svg>
