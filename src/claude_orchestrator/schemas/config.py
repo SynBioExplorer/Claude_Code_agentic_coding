@@ -15,16 +15,17 @@ class ModelConfig(BaseModel):
     planner_model: str = Field(default="opus", description="Model for Planner-Architect")
     supervisor_model: str = Field(default="sonnet", description="Model for Supervisor")
     worker_model: str = Field(default="sonnet", description="Model for Workers")
-    verifier_model: str = Field(default="sonnet", description="Model for Verifier")
+    verifier_model: str = Field(default="opus", description="Model for Verifier")
 
 
 class OrchestrationSettings(BaseModel):
     """Orchestration settings."""
 
     planner_model: str = Field(default="opus")
+    planner_thinking: str = Field(default="ultrahard", description="Thinking budget for planner")
     supervisor_model: str = Field(default="sonnet")
     worker_model: str = Field(default="sonnet")
-    verifier_model: str = Field(default="sonnet")
+    verifier_model: str = Field(default="opus")
     max_parallel_workers: int = Field(default=5)
     max_iterations: int = Field(default=3)
     merge_strategy: str = Field(default="merge_bubble")

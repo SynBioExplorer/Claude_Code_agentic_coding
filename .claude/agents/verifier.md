@@ -7,7 +7,7 @@ description: >
 tools:
   - Read
   - Bash
-model: sonnet
+model: opus
 ---
 
 # Verifier Agent
