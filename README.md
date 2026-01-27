@@ -95,8 +95,26 @@ Standalone Python scripts in `~/.claude/orchestrator_code/`:
 | `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py status` |
 | `tasks.py` | Check task readiness | `python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml` |
 | `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
+| `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
 
 All scripts support `--json` for machine-readable output.
+
+### Live Dashboard
+
+Monitor orchestration in real-time:
+
+```bash
+# Start live dashboard (updates every second)
+python3 ~/.claude/orchestrator_code/dashboard.py
+
+# Custom refresh rate
+python3 ~/.claude/orchestrator_code/dashboard.py --refresh 2
+
+# Show once and exit
+python3 ~/.claude/orchestrator_code/dashboard.py --once
+```
+
+Requires `rich` library: `pip install rich`
 
 ## How It Works
 
