@@ -25,7 +25,7 @@ cp -r .claude/orchestrator_code ~/.claude/
 
 # Copy the orchestrate skill
 mkdir -p ~/.claude/skills
-cp .claude/skills/orchestrate.md ~/.claude/skills/
+cp -r .claude/skills/orchestrate ~/.claude/skills/
 ```
 
 ### 2. Verify installation
