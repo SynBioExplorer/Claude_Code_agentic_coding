@@ -97,11 +97,20 @@ python3 ~/.claude/orchestrator_code/verify.py full <task-id> tasks.yaml --env-ha
 ## Stage 0: Initialize
 
 ```bash
+# Launch dashboard in a separate tmux session (auto-opens for monitoring)
+tmux new-session -d -s "orchestrator-dashboard" "python3 ~/.claude/orchestrator_code/dashboard.py"
+
 # Read and validate the execution plan
 cat tasks.yaml
 
 # Validate DAG structure
 python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
+```
+
+**Note:** The dashboard runs in tmux session `orchestrator-dashboard`. To view it:
+```bash
+tmux attach -t orchestrator-dashboard
+# Ctrl-b d to detach
 ```
 
 Validate:
@@ -345,10 +354,16 @@ cleanup_worktrees() {
   fi
 }
 
+# Cleanup dashboard session
+cleanup_dashboard() {
+  tmux kill-session -t "orchestrator-dashboard" 2>/dev/null || true
+}
+
 # Full cleanup (run at end of orchestration)
 full_cleanup() {
   cleanup_workers
   cleanup_worktrees
+  cleanup_dashboard
   echo "Cleanup complete"
 }
 ```
@@ -366,11 +381,17 @@ full_cleanup() {
 # Kill all worker sessions (one-liner)
 tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^worker-' | xargs -I {} tmux kill-session -t {} 2>/dev/null
 
+# Kill dashboard session
+tmux kill-session -t "orchestrator-dashboard" 2>/dev/null
+
 # List any remaining worker sessions
 tmux list-sessions 2>/dev/null | grep 'worker-' || echo "No worker sessions found"
 
 # List any remaining worktrees
 git worktree list | grep '.worktrees/' || echo "No orchestration worktrees found"
+
+# View dashboard (if running)
+tmux attach -t "orchestrator-dashboard"  # Ctrl-b d to detach
 ```
 
 ## Error Handling
