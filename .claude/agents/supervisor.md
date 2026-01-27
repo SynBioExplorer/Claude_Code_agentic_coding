@@ -288,9 +288,66 @@ tmux capture-pane -t "worker-<task-id>" -p -S -100
 5. **Clean up** - Remove worktrees and kill tmux sessions after merge.
 6. **Max 3 iterations** - If review rejects 3 times, escalate to user.
 
+## Cleanup Routine
+
+**IMPORTANT**: Always run cleanup at the end of orchestration (success or failure) to prevent zombie sessions.
+
+```bash
+# Cleanup all worker sessions
+cleanup_workers() {
+  echo "Cleaning up worker sessions..."
+  tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^worker-' | while read session; do
+    echo "Killing session: $session"
+    tmux kill-session -t "$session" 2>/dev/null || true
+  done
+}
+
+# Cleanup orphaned worktrees
+cleanup_worktrees() {
+  echo "Cleaning up worktrees..."
+  if [ -d ".worktrees" ]; then
+    for dir in .worktrees/*/; do
+      [ -d "$dir" ] || continue
+      task_id=$(basename "$dir")
+      git worktree remove --force ".worktrees/$task_id" 2>/dev/null || true
+      git branch -D "task/$task_id" 2>/dev/null || true
+    done
+    rmdir .worktrees 2>/dev/null || true
+  fi
+}
+
+# Full cleanup (run at end of orchestration)
+full_cleanup() {
+  cleanup_workers
+  cleanup_worktrees
+  echo "Cleanup complete"
+}
+```
+
+### When to Run Cleanup
+
+1. **After successful completion** - Run `full_cleanup` after planner-architect review accepts
+2. **On orchestration failure** - Run `full_cleanup` before reporting error to user
+3. **On timeout** - Run `cleanup_workers` for timed-out tasks
+4. **Manual recovery** - User can run cleanup commands if orchestration was interrupted
+
+### Quick Cleanup Commands
+
+```bash
+# Kill all worker sessions (one-liner)
+tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^worker-' | xargs -I {} tmux kill-session -t {} 2>/dev/null
+
+# List any remaining worker sessions
+tmux list-sessions 2>/dev/null | grep 'worker-' || echo "No worker sessions found"
+
+# List any remaining worktrees
+git worktree list | grep '.worktrees/' || echo "No orchestration worktrees found"
+```
+
 ## Error Handling
 
 - **Worker crashes**: Check tmux session output, mark as failed, retry (max 3)
 - **Verification fails**: Log specific errors, mark for retry
 - **Merge conflict**: Should not happen with proper ownership - escalate to user
 - **Timeout**: Kill tmux session after 30 minutes, mark as failed
+- **Interrupted orchestration**: Run `full_cleanup` to remove all worker sessions and worktrees
