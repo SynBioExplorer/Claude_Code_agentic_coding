@@ -145,8 +145,9 @@ Python scripts in `~/.claude/orchestrator_code/`:
 | `state.py init` | Initialize state (auto-opens monitoring) |
 | `state.py resume` | Resume interrupted orchestration |
 | `state.py status` | Check orchestration status |
-| `monitoring.py` | Open 3-panel monitoring windows |
-| `dashboard.py` | Live monitoring with context usage |
+| `monitoring.py` | Open monitoring windows (dashboard + workers) |
+| `dashboard.py` | Live status table with context usage |
+| `workers_view.py` | Live worker output (uses capture-pane, not attach) |
 | `risk.py` | Compute risk score |
 | `conflict.py` | Detect file/resource conflicts |
 | `dag.py` | Validate DAG, detect cycles |
