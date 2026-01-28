@@ -6,37 +6,25 @@ tools:
   - Write
   - Glob
   - Task
-  # tmux session management
-  - Bash(tmux new-session:*)
-  - Bash(tmux send-keys:*)
-  - Bash(tmux list-sessions:*)
-  - Bash(tmux has-session:*)
-  - Bash(tmux kill-session:*)
-  - Bash(tmux capture-pane:*)
-  - Bash(tmux attach:*)
-  # git worktree management
-  - Bash(git worktree:*)
-  - Bash(git checkout:*)
-  - Bash(git merge:*)
-  - Bash(git branch:*)
-  - Bash(git status:*)
-  - Bash(git init:*)
+  # tmux - all subcommands
+  - Bash(tmux:*)
+  # git - all subcommands
+  - Bash(git:*)
   # orchestrator utilities
   - Bash(python3 ~/.claude/orchestrator_code:*)
+  # package managers
+  - Bash(uv:*)
+  - Bash(npm:*)
+  - Bash(pip:*)
+  # general utilities
   - Bash(cat:*)
   - Bash(mkdir:*)
   - Bash(rmdir:*)
   - Bash(sleep:*)
-  # package managers (for environment setup)
-  - Bash(uv sync:*)
-  - Bash(npm install:*)
-  - Bash(pip install:*)
-  # monitoring window management
-  - Bash(python3 ~/.claude/orchestrator_code/monitoring.py:*)
-  - Bash(osascript:*)
   - Bash(watch:*)
   - Bash(tail:*)
   - Bash(echo:*)
+  - Bash(osascript:*)
 model: sonnet
 ---
 
@@ -81,11 +69,20 @@ python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
 # Compute environment hash
 python3 ~/.claude/orchestrator_code/environment.py
 
-# Initialize orchestration state
+# Initialize orchestration state (auto-opens monitoring windows)
 python3 ~/.claude/orchestrator_code/state.py init "User request" tasks.yaml
+
+# Initialize without auto-opening monitoring
+python3 ~/.claude/orchestrator_code/state.py init "User request" tasks.yaml --no-monitoring
 
 # Check task status
 python3 ~/.claude/orchestrator_code/state.py status
+
+# Resume interrupted orchestration (resets executing tasks, reopens monitoring)
+python3 ~/.claude/orchestrator_code/state.py resume
+
+# Resume dry-run (see what would be done)
+python3 ~/.claude/orchestrator_code/state.py resume --dry-run
 
 # Get ready tasks
 python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml
@@ -110,9 +107,14 @@ cat tasks.yaml
 python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
 ```
 
-### Launch Monitoring Windows (3 Tabs) - REQUIRED
+### Monitoring Windows (Auto-Opened)
 
-**YOU MUST RUN THIS COMMAND** immediately after validation:
+Monitoring windows are **automatically opened** when you run `state.py init`. You should see:
+
+- **Dashboard window** - Live status dashboard
+- **Workers window** - tmux session for viewing worker output
+
+If monitoring didn't open (or you used `--no-monitoring`), run manually:
 
 ```bash
 python3 ~/.claude/orchestrator_code/monitoring.py open --project-dir "$(pwd)"
@@ -285,6 +287,21 @@ done
 
 ## Stage 4: Verify Completed Tasks
 
+### Verification Timing
+
+Verification is **per-task, before merge**:
+
+1. Worker marks task `completed` in `.task-status.json`
+2. Supervisor detects completion (polling)
+3. Supervisor spawns Verifier agent for THAT task
+4. Verifier checks: tests, boundaries, contracts, environment
+5. If passed: Supervisor merges task to main
+6. Repeat for next completed task
+
+**NOT batch verification at the end** - each task is verified independently as it completes. This allows faster feedback and earlier detection of issues.
+
+### Spawning Verifier
+
 For each completed task, spawn the Verifier agent:
 
 ```
@@ -447,10 +464,34 @@ tmux attach -t "orchestrator-dashboard"  # Dashboard
 tmux attach -t "orchestrator-workers"    # Worker output
 ```
 
+## Resuming Interrupted Orchestration
+
+If orchestration was interrupted (user stopped, crash, etc.), run:
+
+```bash
+python3 ~/.claude/orchestrator_code/state.py resume
+```
+
+This will:
+1. Reset tasks stuck in "executing" to "pending"
+2. Clean up incomplete worktrees
+3. Reopen monitoring windows
+4. Return list of tasks ready to execute
+
+Then continue from Stage 2 (spawn workers for pending tasks).
+
+### Dry-Run Mode
+
+To see what resume would do without making changes:
+
+```bash
+python3 ~/.claude/orchestrator_code/state.py resume --dry-run
+```
+
 ## Error Handling
 
 - **Worker crashes**: Check tmux session output, mark as failed, retry (max 3)
 - **Verification fails**: Log specific errors, mark for retry
 - **Merge conflict**: Should not happen with proper ownership - escalate to user
 - **Timeout**: Kill tmux session after 30 minutes, mark as failed
-- **Interrupted orchestration**: Run `full_cleanup` to remove all worker sessions and worktrees
+- **Interrupted orchestration**: Run `state.py resume` or `full_cleanup` to recover
