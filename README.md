@@ -80,7 +80,8 @@ Add a REST API for user management with CRUD operations
 | `planner-architect` | opus | Analyzes codebase, decomposes into parallel tasks, generates contracts, reviews integration |
 | `supervisor` | sonnet | Creates git worktrees, spawns workers in tmux, monitors progress, handles merges |
 | `worker` | sonnet | Executes single task in isolated worktree, respects file boundaries |
-| `verifier` | opus | Runs tests, validates boundaries, checks contracts and environment hash |
+| `verifier` | sonnet | Per-task mechanical checks: tests, boundaries, contracts, environment hash |
+| `integration-checker` | sonnet | Post-merge checks: full test suite, security scanning, type checking |
 
 ## Orchestrator Utilities
 
@@ -158,23 +159,29 @@ The supervisor:
 - Spawns worker agents in tmux sessions for true parallelism
 - Monitors progress via `.task-status.json` files
 
-### 3. Verification Phase (Per-Task)
+### 3. Verification Phase (Two-Tier)
 
-Verification happens **per-task, immediately after completion** - not batch at the end:
+The system uses a **two-tier verification** approach with sonnet for mechanical checks and opus for holistic review:
 
+**Tier 1: Per-Task Verification (sonnet)**
 1. Worker marks task `completed` in `.task-status.json`
-2. Supervisor detects completion and spawns Verifier
-3. Verifier checks: tests, boundaries, contracts, environment
+2. Supervisor spawns Verifier agent for THAT task
+3. Verifier checks: task tests, file boundaries, contract versions, environment hash
 4. If passed: Supervisor merges task to main
 5. Repeat for each completed task
 
-This enables faster feedback and earlier detection of issues.
+**Tier 2: Post-Merge Integration Check (sonnet)**
+After all tasks merged:
+1. Integration-Checker runs full test suite (not just task-specific)
+2. Security scanning (bandit, npm audit, etc.)
+3. Type checking across all modified files
+4. Report any cross-task integration issues
 
-### 4. Integration Phase
+### 4. Review Phase (opus)
 
-After all tasks verified:
-- Supervisor merges task branches to main
-- Planner-architect reviews the integrated result
+After integration checks pass:
+- Planner-architect (opus) reviews the integrated result holistically
+- Evaluates: Does implementation fulfill the request? Is architecture coherent?
 - Accept or iterate (max 3 iterations)
 
 ## Task Specification Format

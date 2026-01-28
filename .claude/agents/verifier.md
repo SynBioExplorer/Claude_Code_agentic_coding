@@ -18,7 +18,7 @@ tools:
   # general utilities
   - Bash(cat:*)
   - Bash(ls:*)
-model: opus
+model: sonnet
 ---
 
 # Verifier Agent

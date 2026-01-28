@@ -51,11 +51,13 @@ Stage 2: Spawn Workers in tmux (parallel execution)
          │         │
 Stage 3: Monitor Progress (poll .task-status.json)
          │
-Stage 4: Verify (spawn verifier for each completed task)
+Stage 4: Verify (sonnet verifier per completed task)
          │
 Stage 5: Merge verified tasks to main
          │
-Stage 6: Invoke Planner-Architect for review
+Stage 5.5: Integration Check (sonnet - full tests, security, types)
+         │
+Stage 6: Invoke Planner-Architect for holistic review (opus)
 ```
 
 ## Orchestrator Utilities
@@ -302,12 +304,12 @@ Verification is **per-task, before merge**:
 
 ### Spawning Verifier
 
-For each completed task, spawn the Verifier agent:
+For each completed task, spawn the Verifier agent (sonnet for mechanical checks):
 
 ```
 Use Task tool with:
 - subagent_type: "verifier"
-- model: "opus"
+- model: "sonnet"
 - prompt: |
     Verify task <task-id> in worktree .worktrees/<task-id>
 
@@ -342,9 +344,54 @@ git branch -d task/<task-id>
 tmux kill-session -t "worker-<task-id>" 2>/dev/null || true
 ```
 
+## Stage 5.5: Integration Check
+
+After ALL tasks are merged, run integration checks before holistic review:
+
+```
+Use Task tool with:
+- subagent_type: "integration-checker"
+- model: "sonnet"
+- prompt: |
+    Run post-merge integration checks.
+
+    Project root: <project directory>
+    Modified files from all tasks:
+    <list all files modified across all merged tasks>
+
+    Run:
+    1. Full test suite (required - must pass)
+    2. Security scanning (report vulnerabilities)
+    3. Type checking if applicable
+
+    Report pass/fail for each check in JSON format.
+```
+
+### Integration Check Results
+
+**If integration checks PASS:**
+- Proceed to Stage 6 (Planner-Architect Review)
+- Include check results in review prompt
+
+**If integration checks FAIL:**
+- Do NOT proceed to review
+- Report specific failures to user
+- May need iteration on specific tasks
+
+### What Integration Check Catches
+
+Unlike per-task verification (Stage 4), integration check runs on the **merged codebase**:
+
+| Per-Task Verifier | Integration Checker |
+|-------------------|---------------------|
+| Task's own tests | Full test suite |
+| Task's file boundaries | Cross-task integration |
+| Contract versions | Security vulnerabilities |
+| Environment hash | Type consistency across modules |
+
 ## Stage 6: Invoke Review
 
-After all tasks merged:
+After all tasks merged AND integration checks pass:
 
 ```
 Use Task tool with:
@@ -353,16 +400,21 @@ Use Task tool with:
 - prompt: |
     REVIEW MODE
 
-    All tasks have been implemented and merged. Review the integration:
+    All tasks have been implemented, merged, and passed integration checks.
 
     Original request: <request from tasks.yaml>
     Tasks completed: <list of task IDs>
 
-    Check:
-    1. All components integrate correctly
-    2. Contracts are properly implemented
-    3. No integration issues
-    4. Code follows project patterns
+    Integration check results:
+    - Full test suite: PASSED
+    - Security scan: <summary of findings, if any>
+    - Type check: <summary, if applicable>
+
+    Review the integration holistically:
+    1. Does the implementation fulfill the original request?
+    2. Are contracts properly implemented across components?
+    3. Is the architecture coherent?
+    4. Does code follow project patterns?
 
     Either ACCEPT the work or provide specific feedback for iteration.
 ```
