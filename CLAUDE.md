@@ -10,12 +10,13 @@ The specification is in `ARCHITECTURE_8.md`.
 
 ## Architecture Summary
 
-The system consists of four agent types:
+The system consists of five agent types:
 
 1. **Planner-Architect** (opus model): Analyzes requests, designs architecture, decomposes into parallel tasks, generates interface contracts, and performs holistic reviews
 2. **Supervisor** (sonnet model): Orchestrates execution, manages worktrees/tmux sessions, monitors progress, handles merges
 3. **Worker** (sonnet model): Executes individual tasks in isolated git worktrees
-4. **Verifier** (sonnet model): Runs mechanical validation checks (tests, linting, boundary enforcement)
+4. **Verifier** (sonnet model): Per-task mechanical validation (tests, boundaries, contracts, environment hash)
+5. **Integration-Checker** (sonnet model): Post-merge checks (full test suite, security scanning, type checking)
 
 ## Key Concepts
 
@@ -50,6 +51,21 @@ Project configuration lives in `.claude-agents.yaml` with sections for:
 - `boundaries`: Churn detection, forbidden patterns
 - `patch_intents`: Framework adapter settings
 - `dependencies`: Ecosystem-specific package management
+
+## Pre-Commit: Global/Local Sync Check
+
+**IMPORTANT**: Before committing changes to this repository, always verify that files are in sync between the global Claude config (`~/.claude/`) and the repo (`.claude/`).
+
+Run this check:
+```bash
+echo "=== Agents ===" && for f in supervisor.md verifier.md integration-checker.md worker.md planner-architect.md; do diff -q ~/.claude/agents/$f .claude/agents/$f 2>/dev/null && echo "$f: ✓" || echo "$f: DIFFERS"; done && echo "" && echo "=== Orchestrator Code ===" && for f in state.py monitoring.py dashboard.py environment.py verify.py tasks.py dag.py risk.py conflict.py contracts.py; do diff -q ~/.claude/orchestrator_code/$f .claude/orchestrator_code/$f 2>/dev/null && echo "$f: ✓" || echo "$f: DIFFERS"; done && echo "" && echo "=== Skills ===" && diff -q ~/.claude/skills/orchestrate/SKILL.md .claude/skills/orchestrate/SKILL.md 2>/dev/null && echo "SKILL.md: ✓" || echo "SKILL.md: DIFFERS"
+```
+
+If files differ, sync them before committing:
+- If repo has newer changes: `cp .claude/<path> ~/.claude/<path>`
+- If global has newer changes: `cp ~/.claude/<path> .claude/<path>`
+
+This ensures users who install from this repo get the same files that work in the global config.
 
 ## Implementation Notes
 
