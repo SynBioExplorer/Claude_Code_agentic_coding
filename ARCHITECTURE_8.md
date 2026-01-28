@@ -54,7 +54,7 @@ A coordinated multi-agent system for Claude Code that enables parallel task exec
                  └───────────────────┼───────────────────┘
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              VERIFIER                                        │
+│                         VERIFIER (per-task, sonnet)                          │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
 │  │  Run Tests  │→ │  Check      │→ │  Validate   │→ │  Pass/Fail  │        │
 │  │  & Lint     │  │  Contracts  │  │  Boundaries │  │  Per Task   │        │
@@ -63,9 +63,20 @@ A coordinated multi-agent system for Claude Code that enables parallel task exec
 │  Per-task verification before merge. No architectural judgment.              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
+                                     ▼ (after all tasks merged)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    INTEGRATION-CHECKER (post-merge, sonnet)                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │  Full Test  │→ │  Security   │→ │  Type       │→ │  Pass/Fail  │        │
+│  │  Suite      │  │  Scanning   │  │  Checking   │  │  Report     │        │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        │
+│                                                                              │
+│  Post-merge integration checks. Catches cross-task issues.                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     PLANNER-ARCHITECT (Review Mode)                          │
+│                     PLANNER-ARCHITECT (Review Mode, opus)                    │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
 │  │  Evaluate   │→ │  Check      │→ │  Assess     │→ │  Accept or  │        │
 │  │  Integration│  │  Architecture│  │  Quality    │  │  Iterate    │        │
@@ -791,6 +802,77 @@ def compute_risk_score(plan: ExecutionPlan) -> RiskScore:
   }
 }
 ```
+
+---
+
+### Integration-Checker Agent
+
+**Role:** Run post-merge integration checks to catch cross-task issues that per-task verification might miss.
+
+**Tools:** `Bash`, `Read`, `Glob`, `Grep`
+
+**Model:** `sonnet` (execution-focused, mechanical checks only)
+
+**When Invoked:** After ALL tasks have been merged to main, before Planner-Architect review.
+
+**Responsibilities:**
+
+1. **Full Test Suite**
+   - Run all tests, not just task-specific ones
+   - Catches integration issues between merged tasks
+
+2. **Security Scanning**
+   - Python: `bandit`, `safety check`, `pip-audit`
+   - Node: `npm audit`
+   - Rust: `cargo audit`
+   - Report vulnerabilities (may not block if low severity)
+
+3. **Type Checking**
+   - Run type checker across all modified files
+   - Python: `mypy`, `pyright`
+   - TypeScript: `tsc --noEmit`
+   - Catches cross-module type inconsistencies
+
+**Output:**
+
+```json
+{
+  "integration_passed": true,
+  "project_type": "python",
+  "checks": [
+    {
+      "name": "full_test_suite",
+      "passed": true,
+      "required": true,
+      "command": "pytest",
+      "output": "42 passed in 3.2s"
+    },
+    {
+      "name": "security_scan",
+      "passed": true,
+      "required": false,
+      "tool": "bandit",
+      "vulnerabilities": []
+    },
+    {
+      "name": "type_check",
+      "passed": true,
+      "required": false,
+      "tool": "mypy",
+      "errors": []
+    }
+  ]
+}
+```
+
+**Failure Criteria:**
+
+| Check | Required | Failure Action |
+|-------|----------|----------------|
+| Full test suite | Yes | Block review, must fix |
+| Security (HIGH/CRITICAL) | Yes | Block review |
+| Security (low/medium) | No | Report to reviewer |
+| Type errors | No | Report to reviewer |
 
 ---
 
@@ -1645,7 +1727,7 @@ This architecture enables:
 2. **Intelligent Scheduling** — DAG-based execution on files AND resources
 3. **No Merge Conflicts** — File ownership + resource ownership + structured intents
 4. **Semantic Safety** — Interface contracts prevent API mismatches
-5. **Separation of Concerns** — Verifier (mechanical) vs Planner-Architect (judgment)
+5. **Two-Tier Verification** — Sonnet for mechanical checks (per-task + integration), Opus for holistic review
 6. **Multi-Region Code Generation** — Adapters produce imports/body separately
 7. **Anchor-Based Marker Insertion** — Defined placement policy per adapter
 8. **Environment Consistency** — env_hash verification prevents "works on my worktree"
@@ -1655,5 +1737,16 @@ This architecture enables:
 12. **Framework Agnostic** — Core protocol + optional adapters
 13. **Ecosystem-Aware Dependencies** — Canonical lockfiles per ecosystem
 14. **Human Oversight** — Approval gates and escalation paths
+15. **Security Scanning** — Post-merge security checks via integration-checker
 
 The system transforms complex multi-file features into coordinated parallel execution with deterministic, conflict-free merging.
+
+## Agent Summary
+
+| Agent | Model | Role |
+|-------|-------|------|
+| Planner-Architect | opus | Analyzes requests, designs architecture, decomposes tasks, reviews integration |
+| Supervisor | sonnet | Orchestrates execution, manages worktrees/tmux, monitors, merges |
+| Worker | sonnet | Executes single task in isolated worktree |
+| Verifier | sonnet | Per-task mechanical validation (tests, boundaries, contracts) |
+| Integration-Checker | sonnet | Post-merge checks (full tests, security, types) |
