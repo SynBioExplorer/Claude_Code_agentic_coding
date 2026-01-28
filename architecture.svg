@@ -142,17 +142,22 @@
   <line x1="500" y1="570" x2="500" y2="600" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
 
   <!-- Verifier Box -->
-  <rect x="360" y="605" width="280" height="70" rx="10" fill="url(#verifierGrad)" filter="url(#shadow)"/>
-  <text x="500" y="632" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">VERIFIER</text>
-  <text x="500" y="650" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">opus model</text>
-  <text x="500" y="665" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Tests • Boundaries • Contracts • Env Hash</text>
+  <rect x="230" y="605" width="240" height="60" rx="10" fill="url(#verifierGrad)" filter="url(#shadow)"/>
+  <text x="350" y="628" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="white">VERIFIER</text>
+  <text x="350" y="644" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">sonnet • per-task</text>
+  <text x="350" y="658" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="rgba(255,255,255,0.8)">Tests • Boundaries • Contracts</text>
 
-  <!-- Per-task verification note -->
-  <rect x="650" y="612" width="130" height="28" rx="4" fill="#dcfce7" stroke="#22c55e" stroke-width="1"/>
-  <text x="715" y="630" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" font-weight="500" fill="#166534">Per-task, before merge</text>
+  <!-- Arrow to Integration Checker -->
+  <line x1="470" y1="635" x2="520" y2="635" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Integration Checker Box -->
+  <rect x="530" y="605" width="240" height="60" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" filter="url(#shadow)"/>
+  <text x="650" y="628" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#92400e">INTEGRATION-CHECKER</text>
+  <text x="650" y="644" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • post-merge</text>
+  <text x="650" y="658" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#92400e">Full Tests • Security • Types</text>
 
   <!-- Arrow back to Planner for review -->
-  <path d="M 640 640 L 900 640 L 900 190 L 710 190" stroke="#555" stroke-width="2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>
+  <path d="M 770 635 L 900 635 L 900 190 L 710 190" stroke="#555" stroke-width="2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>
   <text x="920" y="420" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" transform="rotate(90 920 420)">Review Mode (max 3 iterations)</text>
 
   <!-- ==================== SIDE PANELS ==================== -->
@@ -178,22 +183,25 @@
   <text x="840" y="242" font-family="monospace" font-size="7" fill="#64748b"># Version: abc1234</text>
 
   <!-- Legend -->
-  <rect x="820" y="540" width="160" height="130" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="900" y="562" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#475569">Model Legend</text>
+  <rect x="820" y="540" width="160" height="145" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="900" y="560" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#475569">Model Legend</text>
 
-  <circle cx="840" cy="585" r="6" fill="url(#plannerGrad)"/>
-  <text x="855" y="589" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#475569">opus (planning)</text>
+  <circle cx="840" cy="580" r="6" fill="url(#plannerGrad)"/>
+  <text x="855" y="584" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">opus (planning/review)</text>
 
-  <circle cx="840" cy="608" r="6" fill="url(#workerGrad)"/>
-  <text x="855" y="612" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#475569">sonnet (execution)</text>
+  <circle cx="840" cy="600" r="6" fill="url(#workerGrad)"/>
+  <text x="855" y="604" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (workers)</text>
 
-  <circle cx="840" cy="631" r="6" fill="url(#verifierGrad)"/>
-  <text x="855" y="635" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#475569">opus (verification)</text>
+  <circle cx="840" cy="620" r="6" fill="url(#verifierGrad)"/>
+  <text x="855" y="624" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (verifier)</text>
 
-  <line x1="835" y1="650" x2="965" y2="650" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="900" y="665" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">Dashed lines show</text>
-  <text x="900" y="676" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
+  <rect x="834" y="634" width="12" height="12" rx="2" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="855" y="644" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (integration)</text>
+
+  <line x1="835" y1="658" x2="965" y2="658" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="900" y="672" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">Dashed lines show</text>
+  <text x="900" y="683" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
 
   <!-- Footer -->
-  <text x="500" y="780" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">File ownership prevents conflicts • DAG scheduling respects dependencies • Per-task verification before merge</text>
+  <text x="500" y="780" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Two-tier verification: Per-task (sonnet) → Integration check (sonnet) → Holistic review (opus)</text>
 </svg>
