@@ -31,7 +31,8 @@ tools:
   - Bash(uv sync:*)
   - Bash(npm install:*)
   - Bash(pip install:*)
-  # monitoring window (macOS)
+  # monitoring window management
+  - Bash(python3 ~/.claude/orchestrator_code/monitoring.py:*)
   - Bash(osascript:*)
   - Bash(watch:*)
   - Bash(tail:*)
@@ -109,31 +110,19 @@ cat tasks.yaml
 python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
 ```
 
-### Launch Monitoring Windows (3 Tabs)
+### Launch Monitoring Windows (3 Tabs) - REQUIRED
 
-After validation, open 3 terminal windows automatically:
+**YOU MUST RUN THIS COMMAND** immediately after validation:
 
 ```bash
-# TAB 1: Main agent (supervisor) - ALREADY RUNNING (this terminal)
-
-# TAB 2: Dashboard window
-tmux new-session -d -s "orchestrator-dashboard"
-tmux send-keys -t "orchestrator-dashboard" "cd '$(pwd)' && python3 ~/.claude/orchestrator_code/dashboard.py" Enter
-osascript -e 'tell application "Terminal" to do script "tmux attach -t orchestrator-dashboard"'
-
-# TAB 3: Workers window (will show split panes for each worker)
-tmux new-session -d -s "orchestrator-workers"
-tmux send-keys -t "orchestrator-workers" "echo 'Waiting for workers to spawn...'; sleep infinity" Enter
-osascript -e 'tell application "Terminal" to do script "tmux attach -t orchestrator-workers"'
+python3 ~/.claude/orchestrator_code/monitoring.py open --project-dir "$(pwd)"
 ```
 
-**For iTerm2 users**, replace osascript lines with:
-```bash
-osascript -e 'tell application "iTerm" to create window with default profile command "tmux attach -t orchestrator-dashboard"'
-osascript -e 'tell application "iTerm" to create window with default profile command "tmux attach -t orchestrator-workers"'
-```
+This opens 2 new Terminal/iTerm windows:
+1. **Dashboard window** - Runs the live status dashboard directly
+2. **Workers window** - tmux session `orchestrator-workers` for viewing worker output
 
-This creates 3 visible windows:
+Result: 3 visible windows:
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │  TAB 1: MAIN    │  │  TAB 2: DASH    │  │  TAB 3: WORKERS │
@@ -233,26 +222,20 @@ tmux send-keys -t "worker-task-c" "claude --agent worker --print 'Read .task-pro
 
 ### Setup Worker Panes in Workers Window
 
-After spawning worker sessions, create split panes in the workers window to view each:
+After spawning worker sessions, set up panes in the workers view to monitor them:
 
 ```bash
-# Kill the placeholder in workers window
-tmux send-keys -t "orchestrator-workers" C-c
+# Option 1: Set up all worker panes at once (recommended)
+python3 ~/.claude/orchestrator_code/monitoring.py setup-panes --task-ids task-a task-b task-c
 
-# First worker pane - show live output from worker-task-a
-tmux send-keys -t "orchestrator-workers" "watch -n1 'tmux capture-pane -t worker-task-a -p -S -30 2>/dev/null || echo [task-a completed]'" Enter
-
-# Split and add second worker
-tmux split-window -t "orchestrator-workers" -h
-tmux send-keys -t "orchestrator-workers" "watch -n1 'tmux capture-pane -t worker-task-b -p -S -30 2>/dev/null || echo [task-b completed]'" Enter
-
-# Split and add third worker (if exists)
-tmux split-window -t "orchestrator-workers" -v
-tmux send-keys -t "orchestrator-workers" "watch -n1 'tmux capture-pane -t worker-task-c -p -S -30 2>/dev/null || echo [task-c completed]'" Enter
-
-# Balance the panes
-tmux select-layout -t "orchestrator-workers" tiled
+# Option 2: Add panes one at a time
+python3 ~/.claude/orchestrator_code/monitoring.py add-worker --task-id <task-id>
 ```
+
+This automatically:
+- Creates split panes in the `orchestrator-workers` tmux session
+- Each pane shows live output from a worker's tmux session
+- Rebalances the layout to tile all panes
 
 The workers window now shows:
 ```
@@ -424,8 +407,7 @@ cleanup_worktrees() {
 
 # Cleanup monitoring sessions (dashboard + workers window)
 cleanup_monitoring() {
-  tmux kill-session -t "orchestrator-dashboard" 2>/dev/null || true
-  tmux kill-session -t "orchestrator-workers" 2>/dev/null || true
+  python3 ~/.claude/orchestrator_code/monitoring.py close
 }
 
 # Full cleanup (run at end of orchestration)

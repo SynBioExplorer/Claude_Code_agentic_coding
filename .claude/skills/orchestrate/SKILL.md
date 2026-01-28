@@ -81,8 +81,13 @@ Each task declares exclusive `files_write` - only that task can modify those fil
 ### Interface Contracts
 Cross-task dependencies use Protocol stubs in `contracts/`. Workers code against contracts, not implementations.
 
-### Verification
-Every task must have verification commands (tests). The verifier runs them before allowing merge.
+### Verification (Per-Task, Before Merge)
+Verification happens **per-task, immediately after worker completion** - not batch at the end:
+1. Worker marks task `completed`
+2. Supervisor spawns Verifier for that task
+3. Verifier checks: tests, boundaries, contracts, environment
+4. If passed: Supervisor merges to main
+5. Repeat for next completed task
 
 ## Artifacts Created
 
@@ -93,7 +98,7 @@ Every task must have verification commands (tests). The verifier runs them befor
 
 ## Live Monitoring (Auto-Opens)
 
-When orchestration starts, 3 terminal windows open automatically:
+When `state.py init` runs, monitoring windows open automatically (use `--no-monitoring` to disable):
 
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
@@ -111,18 +116,41 @@ When orchestration starts, 3 terminal windows open automatically:
 - **tmux** - For parallel worker sessions
 - **rich** - Python library for dashboard (`pip install rich`)
 
+## Resuming Interrupted Orchestration
+
+If orchestration was interrupted (user stopped, crash, etc.):
+
+```bash
+# See what would be done (dry-run)
+python3 ~/.claude/orchestrator_code/state.py resume --dry-run
+
+# Actually resume
+python3 ~/.claude/orchestrator_code/state.py resume
+```
+
+This will:
+1. Reset tasks stuck in "executing" to "pending"
+2. Clean up incomplete worktrees and orphaned tmux sessions
+3. Reopen monitoring windows
+4. Report tasks ready for verification or merge
+
+Then continue from Stage 2 (spawn workers for pending tasks).
+
 ## Orchestrator Utilities
 
 Python scripts in `~/.claude/orchestrator_code/`:
 
 | Script | Purpose |
 |--------|---------|
+| `state.py init` | Initialize state (auto-opens monitoring) |
+| `state.py resume` | Resume interrupted orchestration |
+| `state.py status` | Check orchestration status |
+| `monitoring.py` | Open 3-panel monitoring windows |
 | `dashboard.py` | Live monitoring with context usage |
 | `risk.py` | Compute risk score |
 | `conflict.py` | Detect file/resource conflicts |
 | `dag.py` | Validate DAG, detect cycles |
 | `contracts.py` | Generate Protocol stubs |
 | `environment.py` | Compute/verify env hash |
-| `state.py` | Manage orchestration state |
 | `tasks.py` | Check task readiness |
 | `verify.py` | Full verification suite |

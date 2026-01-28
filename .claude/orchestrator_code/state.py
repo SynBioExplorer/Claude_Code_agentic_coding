@@ -50,8 +50,14 @@ def compute_env_hash() -> str:
     return "no-lock"
 
 
-def init_state(request: str, tasks_file: str = "tasks.yaml") -> dict:
-    """Initialize orchestration state from tasks file."""
+def init_state(request: str, tasks_file: str = "tasks.yaml", open_monitoring: bool = True) -> dict:
+    """Initialize orchestration state from tasks file.
+
+    Args:
+        request: Original user request
+        tasks_file: Path to tasks YAML file
+        open_monitoring: If True, automatically open monitoring windows
+    """
     plan = load_plan(tasks_file)
     env_hash = compute_env_hash()
 
@@ -72,6 +78,15 @@ def init_state(request: str, tasks_file: str = "tasks.yaml") -> dict:
     }
 
     Path(STATE_FILE).write_text(json.dumps(state, indent=2))
+
+    # Auto-open monitoring windows
+    if open_monitoring:
+        try:
+            from monitoring import open_monitoring_windows
+            open_monitoring_windows(str(Path.cwd()))
+        except Exception as e:
+            print(f"Warning: Could not open monitoring windows: {e}")
+
     return state
 
 
@@ -106,6 +121,22 @@ def update_task(task_id: str, new_status: str, error: str = None) -> dict:
     return state
 
 
+def get_effective_status(task_id: str, task_info: dict) -> str:
+    """Get the effective status of a task by checking worktree status file.
+
+    The worktree status file has the most up-to-date status from the worker.
+    Falls back to the state file status if no worktree status exists.
+    """
+    status_file = Path(f".worktrees/{task_id}/.task-status.json")
+    if status_file.exists():
+        try:
+            task_status = json.loads(status_file.read_text())
+            return task_status.get("status", "unknown")
+        except (json.JSONDecodeError, IOError):
+            pass
+    return task_info.get("status", "pending")
+
+
 def get_status_summary() -> dict:
     """Get summary of all task statuses."""
     state = load_state()
@@ -118,14 +149,7 @@ def get_status_summary() -> dict:
     }
 
     for task_id, task_info in state.get("tasks", {}).items():
-        # Check worktree status file for latest
-        status_file = Path(f".worktrees/{task_id}/.task-status.json")
-        if status_file.exists():
-            task_status = json.loads(status_file.read_text())
-            status = task_status.get("status", "unknown")
-        else:
-            status = task_info.get("status", "pending")
-
+        status = get_effective_status(task_id, task_info)
         results.get(status, results["pending"]).append(task_id)
 
     return {
@@ -133,6 +157,114 @@ def get_status_summary() -> dict:
         "request_id": state.get("request_id"),
         "phase": state.get("current_phase"),
         "iteration": state.get("iteration"),
+        "env_hash": state.get("environment", {}).get("hash")
+    }
+
+
+def cleanup_worktree(task_id: str) -> bool:
+    """Clean up an incomplete worktree."""
+    import subprocess
+    worktree_path = Path(f".worktrees/{task_id}")
+
+    if not worktree_path.exists():
+        return True
+
+    try:
+        # Try to remove worktree via git
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            capture_output=True, check=False
+        )
+        # Try to delete branch
+        subprocess.run(
+            ["git", "branch", "-D", f"task/{task_id}"],
+            capture_output=True, check=False
+        )
+        return True
+    except Exception:
+        return False
+
+
+def resume_orchestration(dry_run: bool = False, open_monitoring: bool = True) -> dict:
+    """Resume interrupted orchestration.
+
+    Handles tasks stuck in 'executing' status and provides summary of
+    what needs to continue.
+
+    Args:
+        dry_run: If True, only report what would be done without making changes
+        open_monitoring: If True, reopen monitoring windows
+
+    Returns:
+        dict with restarted_tasks, ready_for_verification, ready_for_merge lists
+    """
+    state = load_state()
+    if state is None:
+        return {"error": "No orchestration state found"}
+
+    tasks_to_restart = []
+    ready_for_verification = []
+    ready_for_merge = []
+    worktrees_cleaned = []
+
+    for task_id, task_info in state["tasks"].items():
+        status = get_effective_status(task_id, task_info)
+
+        if status == "executing":
+            # Task was interrupted - needs restart
+            worktree = Path(f".worktrees/{task_id}")
+            if worktree.exists() and not dry_run:
+                if cleanup_worktree(task_id):
+                    worktrees_cleaned.append(task_id)
+
+            tasks_to_restart.append(task_id)
+            if not dry_run:
+                update_task(task_id, "pending")
+
+        elif status == "completed":
+            # Completed but not verified yet
+            ready_for_verification.append(task_id)
+
+        elif status == "verified":
+            # Verified but not merged yet
+            ready_for_merge.append(task_id)
+
+    # Kill any orphaned worker tmux sessions
+    if not dry_run:
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["tmux", "list-sessions", "-F", "#{session_name}"],
+                capture_output=True, text=True, check=False
+            )
+            if result.returncode == 0:
+                sessions = result.stdout.strip().split('\n')
+                for session in sessions:
+                    if session.startswith('worker-'):
+                        task_id = session.replace('worker-', '')
+                        if task_id in tasks_to_restart:
+                            subprocess.run(
+                                ["tmux", "kill-session", "-t", session],
+                                capture_output=True, check=False
+                            )
+        except Exception:
+            pass
+
+    # Reopen monitoring windows
+    if not dry_run and open_monitoring:
+        try:
+            from monitoring import open_monitoring_windows
+            open_monitoring_windows(str(Path.cwd()))
+        except Exception as e:
+            print(f"Warning: Could not open monitoring windows: {e}")
+
+    return {
+        "dry_run": dry_run,
+        "restarted_tasks": tasks_to_restart,
+        "worktrees_cleaned": worktrees_cleaned,
+        "ready_for_verification": ready_for_verification,
+        "ready_for_merge": ready_for_merge,
+        "request_id": state.get("request_id"),
         "env_hash": state.get("environment", {}).get("hash")
     }
 
@@ -146,6 +278,8 @@ def main():
     init_parser = subparsers.add_parser("init", help="Initialize state from tasks file")
     init_parser.add_argument("request", help="Original user request")
     init_parser.add_argument("tasks_file", nargs="?", default="tasks.yaml", help="Tasks file")
+    init_parser.add_argument("--no-monitoring", action="store_true",
+                            help="Do not auto-open monitoring windows")
 
     # status command
     status_parser = subparsers.add_parser("status", help="Show status summary")
@@ -157,10 +291,19 @@ def main():
     update_parser.add_argument("status", help="New status")
     update_parser.add_argument("--error", help="Error message if failed")
 
+    # resume command
+    resume_parser = subparsers.add_parser("resume", help="Resume interrupted orchestration")
+    resume_parser.add_argument("--dry-run", action="store_true",
+                              help="Show what would be done without making changes")
+    resume_parser.add_argument("--no-monitoring", action="store_true",
+                              help="Do not reopen monitoring windows")
+    resume_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
     args = parser.parse_args()
 
     if args.command == "init":
-        state = init_state(args.request, args.tasks_file)
+        state = init_state(args.request, args.tasks_file,
+                          open_monitoring=not args.no_monitoring)
         print(f"✓ Initialized orchestration state")
         print(f"  Request ID: {state['request_id']}")
         print(f"  Env hash: {state['environment']['hash']}")
@@ -189,6 +332,47 @@ def main():
     elif args.command == "update":
         update_task(args.task_id, args.status, args.error)
         print(f"✓ Updated {args.task_id} -> {args.status}")
+
+    elif args.command == "resume":
+        result = resume_orchestration(
+            dry_run=args.dry_run,
+            open_monitoring=not args.no_monitoring
+        )
+        if "error" in result:
+            print(result["error"])
+            sys.exit(1)
+
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            mode = "[DRY RUN] " if result["dry_run"] else ""
+            print(f"\n{mode}Resume Orchestration (Request: {result['request_id'][:8]}...)")
+            print(f"Environment hash: {result['env_hash']}")
+
+            if result["restarted_tasks"]:
+                print(f"\n{mode}Tasks reset to pending (were executing):")
+                for t in result["restarted_tasks"]:
+                    print(f"  - {t}")
+            else:
+                print("\nNo tasks stuck in executing state")
+
+            if result["worktrees_cleaned"]:
+                print(f"\n{mode}Worktrees cleaned up:")
+                for t in result["worktrees_cleaned"]:
+                    print(f"  - .worktrees/{t}")
+
+            if result["ready_for_verification"]:
+                print(f"\nTasks ready for verification:")
+                for t in result["ready_for_verification"]:
+                    print(f"  - {t}")
+
+            if result["ready_for_merge"]:
+                print(f"\nTasks ready for merge:")
+                for t in result["ready_for_merge"]:
+                    print(f"  - {t}")
+
+            if not result["dry_run"]:
+                print("\n✓ Resume complete. Continue from Stage 2 (spawn workers).")
 
 
 if __name__ == "__main__":

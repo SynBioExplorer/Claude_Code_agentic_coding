@@ -7,14 +7,11 @@ tools:
   - Grep
   - Glob
   - Task
-  # git commands (analyze repo)
-  - Bash(git status:*)
-  - Bash(git log:*)
-  - Bash(git diff:*)
-  - Bash(git rev-parse:*)
+  # git - all subcommands
+  - Bash(git:*)
   # orchestrator utilities
   - Bash(python3 ~/.claude/orchestrator_code:*)
-  # file operations
+  # general utilities
   - Bash(cat:*)
   - Bash(ls:*)
   - Bash(tree:*)

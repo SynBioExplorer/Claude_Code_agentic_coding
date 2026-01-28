@@ -93,10 +93,11 @@ Standalone Python scripts in `~/.claude/orchestrator_code/`:
 | `dag.py` | Validate DAG, show execution waves | `python3 ~/.claude/orchestrator_code/dag.py tasks.yaml` |
 | `contracts.py` | Generate Protocol stubs | `python3 ~/.claude/orchestrator_code/contracts.py MyProtocol login logout -o contracts/my.py` |
 | `environment.py` | Compute/verify env hash | `python3 ~/.claude/orchestrator_code/environment.py --verify abc123` |
-| `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py status` |
+| `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py init/status/resume` |
 | `tasks.py` | Check task readiness | `python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml` |
 | `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
 | `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
+| `monitoring.py` | Open/manage monitoring windows | `python3 ~/.claude/orchestrator_code/monitoring.py open` |
 
 All scripts support `--json` for machine-readable output.
 
@@ -119,7 +120,7 @@ Requires `rich` library: `pip install rich`
 
 ### Auto-Opening Monitoring Windows
 
-When orchestration starts, 3 terminal windows open automatically (macOS):
+When `state.py init` runs, monitoring windows open automatically (macOS). Use `--no-monitoring` to disable:
 
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
@@ -157,13 +158,17 @@ The supervisor:
 - Spawns worker agents in tmux sessions for true parallelism
 - Monitors progress via `.task-status.json` files
 
-### 3. Verification Phase
+### 3. Verification Phase (Per-Task)
 
-The verifier checks each completed task:
-- Runs verification commands (tests, linting)
-- Validates file boundaries
-- Checks contract versions
-- Verifies environment hash
+Verification happens **per-task, immediately after completion** - not batch at the end:
+
+1. Worker marks task `completed` in `.task-status.json`
+2. Supervisor detects completion and spawns Verifier
+3. Verifier checks: tests, boundaries, contracts, environment
+4. If passed: Supervisor merges task to main
+5. Repeat for each completed task
+
+This enables faster feedback and earlier detection of issues.
 
 ### 4. Integration Phase
 
@@ -273,6 +278,26 @@ your-project/
 ```
 
 ## Troubleshooting
+
+### Resume interrupted orchestration
+
+If orchestration was interrupted (user stopped, crash, etc.):
+
+```bash
+# See what would be done (dry-run)
+python3 ~/.claude/orchestrator_code/state.py resume --dry-run
+
+# Actually resume
+python3 ~/.claude/orchestrator_code/state.py resume
+```
+
+This will:
+- Reset tasks stuck in "executing" to "pending"
+- Clean up incomplete worktrees and orphaned tmux sessions
+- Reopen monitoring windows
+- Report tasks ready for verification or merge
+
+Then continue from supervisor Stage 2 (spawn workers for pending tasks).
 
 ### Check orchestration status
 ```bash

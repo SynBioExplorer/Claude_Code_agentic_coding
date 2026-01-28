@@ -7,26 +7,20 @@ tools:
   - Edit
   - Glob
   - Grep
-  # git commands (commit work, check status)
-  - Bash(git status:*)
-  - Bash(git add:*)
-  - Bash(git commit:*)
-  - Bash(git diff:*)
-  - Bash(pwd:*)
+  # git - all subcommands
+  - Bash(git:*)
   # test runners
   - Bash(pytest:*)
-  - Bash(python3 -m pytest:*)
-  - Bash(npm test:*)
-  - Bash(npm run test:*)
-  - Bash(cargo test:*)
-  - Bash(go test:*)
-  # python/node execution
   - Bash(python3:*)
   - Bash(node:*)
-  # file operations
+  - Bash(npm:*)
+  - Bash(cargo:*)
+  - Bash(go:*)
+  # general utilities
   - Bash(cat:*)
   - Bash(mkdir:*)
   - Bash(ls:*)
+  - Bash(pwd:*)
 model: sonnet
 ---
 

@@ -5,21 +5,17 @@ tools:
   - Read
   - Glob
   - Grep
-  # git commands (check diffs, status)
-  - Bash(git diff:*)
-  - Bash(git status:*)
-  - Bash(git log:*)
+  # git - all subcommands
+  - Bash(git:*)
   # orchestrator utilities
   - Bash(python3 ~/.claude/orchestrator_code:*)
   # test runners
   - Bash(pytest:*)
-  - Bash(python3 -m pytest:*)
-  - Bash(npm test:*)
-  - Bash(npm run test:*)
-  - Bash(npm run lint:*)
-  - Bash(cargo test:*)
-  - Bash(go test:*)
-  # file reading
+  - Bash(python3:*)
+  - Bash(npm:*)
+  - Bash(cargo:*)
+  - Bash(go:*)
+  # general utilities
   - Bash(cat:*)
   - Bash(ls:*)
 model: opus
