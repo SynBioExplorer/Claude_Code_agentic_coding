@@ -179,17 +179,41 @@ EOF
 
 **CRITICAL: Use tmux to run workers in parallel, NOT the Task tool.**
 
+### Shell Initialization
+
+tmux starts a non-login shell that doesn't source `.bashrc` or `.zshrc`. You MUST include conda initialization in the send-keys command.
+
+```bash
+# IMPORTANT: Set these variables BEFORE spawning workers
+# Detect conda installation path
+CONDA_SH="/opt/miniconda3/etc/profile.d/conda.sh"
+[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ] && CONDA_SH="$HOME/miniconda3/etc/profile.d/conda.sh"
+[ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ] && CONDA_SH="$HOME/anaconda3/etc/profile.d/conda.sh"
+
+# Get current conda environment (if active)
+CONDA_ENV="${CONDA_DEFAULT_ENV:-base}"
+
+# Store absolute project path (relative paths break if cwd changes)
+PROJECT_ROOT="$(pwd)"
+
+# Ensure tmux server is running before spawning sessions
+tmux start-server
+```
+
 For each task that's ready (dependencies satisfied):
 
 ```bash
 # Check which tasks are ready
 python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml
 
-# Create a tmux session for this worker
-tmux new-session -d -s "worker-<task-id>" -c ".worktrees/<task-id>"
+# Create a tmux session for this worker (use absolute path!)
+tmux new-session -d -s "worker-<task-id>" -c "$PROJECT_ROOT/.worktrees/<task-id>"
+
+# Small delay to ensure session is fully initialized
+sleep 0.2
 
 # Write the task prompt to a file the worker will read
-cat > .worktrees/<task-id>/.task-prompt.md << 'EOF'
+cat > "$PROJECT_ROOT/.worktrees/<task-id>/.task-prompt.md" << 'EOF'
 Execute task: <task-id>
 
 ## Task Specification
@@ -208,20 +232,29 @@ Execute task: <task-id>
 EOF
 
 # Launch claude CLI with worker agent in the tmux session
-tmux send-keys -t "worker-<task-id>" "claude --agent worker --print 'Read .task-prompt.md and execute the task'" Enter
+# Include conda initialization for proper environment access
+tmux send-keys -t "worker-<task-id>" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute the task'" Enter
 ```
 
 ### Spawning Multiple Workers in Parallel
 
 ```bash
-# Example: spawn 3 workers simultaneously
-tmux new-session -d -s "worker-task-a" -c ".worktrees/task-a"
-tmux new-session -d -s "worker-task-b" -c ".worktrees/task-b"
-tmux new-session -d -s "worker-task-c" -c ".worktrees/task-c"
+# Ensure tmux server is running first (prevents race condition)
+tmux start-server
 
-tmux send-keys -t "worker-task-a" "claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
-tmux send-keys -t "worker-task-b" "claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
-tmux send-keys -t "worker-task-c" "claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
+# Create all sessions (use absolute paths!)
+tmux new-session -d -s "worker-task-a" -c "$PROJECT_ROOT/.worktrees/task-a"
+tmux new-session -d -s "worker-task-b" -c "$PROJECT_ROOT/.worktrees/task-b"
+tmux new-session -d -s "worker-task-c" -c "$PROJECT_ROOT/.worktrees/task-c"
+
+# Small delay to ensure all sessions are initialized
+sleep 0.3
+
+# Send commands to all workers
+# Note: Variables are expanded NOW, so they must be set before this runs
+tmux send-keys -t "worker-task-a" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
+tmux send-keys -t "worker-task-b" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
+tmux send-keys -t "worker-task-c" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
 ```
 
 ### Setup Worker Panes in Workers Window
@@ -479,11 +512,21 @@ cleanup_monitoring() {
   python3 ~/.claude/orchestrator_code/monitoring.py close
 }
 
+# Clean up stale tmux socket if server is dead
+cleanup_tmux_socket() {
+  if ! tmux list-sessions &>/dev/null; then
+    # Server not running, remove stale socket
+    rm -f "/private/tmp/tmux-$(id -u)/default" 2>/dev/null
+    echo "Cleaned up stale tmux socket"
+  fi
+}
+
 # Full cleanup (run at end of orchestration)
 full_cleanup() {
   cleanup_workers
   cleanup_worktrees
   cleanup_monitoring
+  cleanup_tmux_socket
   echo "Cleanup complete"
 }
 ```

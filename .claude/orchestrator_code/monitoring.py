@@ -14,6 +14,7 @@ import sys
 import os
 import time
 import shutil
+import shlex
 
 def get_terminal_app():
     """Detect which terminal app to use."""
@@ -22,13 +23,41 @@ def get_terminal_app():
         return "iTerm"
     return "Terminal"
 
+
+def ensure_tmux_server():
+    """Ensure tmux server is running, clean up stale socket if needed."""
+    # Check if tmux server is alive
+    result = subprocess.run(
+        ["tmux", "list-sessions"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return True  # Server is running
+
+    # Server not running - check for stale socket
+    uid = os.getuid()
+    socket_dir = f"/private/tmp/tmux-{uid}"
+    socket_path = os.path.join(socket_dir, "default")
+
+    if os.path.exists(socket_path):
+        # Socket exists but server is dead - remove it
+        try:
+            os.remove(socket_path)
+            print(f"  Cleaned up stale tmux socket")
+        except OSError as e:
+            print(f"  Warning: Could not remove stale socket: {e}", file=sys.stderr)
+
+    return True
+
 def open_terminal_with_command(command: str, app: str = None):
     """Open a new terminal window that runs a command."""
     if app is None:
         app = get_terminal_app()
 
-    # Escape single quotes in the command for AppleScript
-    escaped_cmd = command.replace("'", "'\\''")
+    # Escape for AppleScript double-quoted strings:
+    # 1. Backslashes must be doubled: \ -> \\
+    # 2. Double quotes must be escaped: " -> \"
+    escaped_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
 
     if app == "iTerm":
         script = f'''
@@ -72,24 +101,31 @@ def open_monitoring_windows(project_dir: str = None):
     app = get_terminal_app()
     print(f"  Using: {app}")
 
+    # Clean up stale tmux socket if needed
+    ensure_tmux_server()
+
+    # Use shlex.quote for proper shell escaping of paths with special characters
+    quoted_dir = shlex.quote(project_dir)
+
     # Dashboard window - run dashboard directly (no tmux needed for this)
-    dashboard_cmd = f"cd '{project_dir}' && echo '=== ORCHESTRATION DASHBOARD ===' && python3 ~/.claude/orchestrator_code/dashboard.py"
+    dashboard_cmd = f"cd {quoted_dir} && echo '=== ORCHESTRATION DASHBOARD ===' && python3 ~/.claude/orchestrator_code/dashboard.py"
     if open_terminal_with_command(dashboard_cmd, app):
         print("  Opened Dashboard window")
     else:
         print("  FAILED to open Dashboard window")
 
-    # Workers window - create a tmux session for workers and attach to it
-    # This way the Terminal owns the tmux client, keeping it alive
-    workers_cmd = f"cd '{project_dir}' && tmux new-session -A -s orchestrator-workers -c '{project_dir}'"
+    # Workers window - use live capture view instead of tmux attach
+    # (tmux attach crashes with conda's tmux on macOS)
+    # This uses watch + capture-pane to show live output without attaching
+    workers_cmd = f"cd {quoted_dir} && source /opt/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || true; python3 ~/.claude/orchestrator_code/workers_view.py"
     if open_terminal_with_command(workers_cmd, app):
-        print("  Opened Workers window (tmux session: orchestrator-workers)")
+        print("  Opened Workers window (live capture view)")
     else:
         print("  FAILED to open Workers window")
 
     print("\nMonitoring windows opened!")
-    print(f"  Dashboard: Running in Terminal (no tmux)")
-    print(f"  Workers:   tmux session 'orchestrator-workers'")
+    print(f"  Dashboard: Live status table")
+    print(f"  Workers:   Live capture view (no tmux attach)")
 
 
 def setup_worker_panes(task_ids: list):
@@ -136,20 +172,6 @@ def setup_worker_panes(task_ids: list):
 
     print(f"Set up {len(task_ids)} worker panes")
     return True
-
-    if open_terminal_window(f"tmux attach -t {dashboard_session}", "Dashboard", app):
-        print(f"    Opened Dashboard window")
-    else:
-        print(f"    FAILED to open Dashboard window - attach manually: tmux attach -t {dashboard_session}")
-
-    if open_terminal_window(f"tmux attach -t {workers_session}", "Workers", app):
-        print(f"    Opened Workers window")
-    else:
-        print(f"    FAILED to open Workers window - attach manually: tmux attach -t {workers_session}")
-
-    print("\nMonitoring ready!")
-    print(f"  Dashboard: tmux attach -t {dashboard_session}")
-    print(f"  Workers:   tmux attach -t {workers_session}")
 
 def add_worker_pane(task_id: str):
     """Add a pane to the workers window for a new worker."""

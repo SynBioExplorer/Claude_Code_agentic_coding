@@ -56,14 +56,30 @@ def get_tmux_sessions() -> dict:
         return {}
 
 
-def get_tmux_pane_content(session_name: str, lines: int = 50) -> str:
-    """Capture recent output from a tmux session."""
+def get_tmux_pane_content(session_name: str, lines: int = 100) -> str:
+    """Capture recent output from a tmux session.
+
+    Uses -e flag to capture escape sequences (for status line) and
+    captures more lines to ensure we get the current status area.
+    """
     try:
+        # Try to capture the visible pane content including status area
+        # -p prints to stdout, -S -100 captures last 100 lines
         result = subprocess.run(
             ["tmux", "capture-pane", "-t", session_name, "-p", "-S", f"-{lines}"],
             capture_output=True, text=True
         )
-        return result.stdout if result.returncode == 0 else ""
+        content = result.stdout if result.returncode == 0 else ""
+
+        # Also try to capture the last visible line (often has status info)
+        if not content.strip():
+            result = subprocess.run(
+                ["tmux", "capture-pane", "-t", session_name, "-p"],
+                capture_output=True, text=True
+            )
+            content = result.stdout if result.returncode == 0 else ""
+
+        return content
     except (subprocess.CalledProcessError, FileNotFoundError):
         return ""
 
@@ -75,36 +91,58 @@ def parse_context_usage(pane_content: str) -> tuple:
     """
     import re
 
-    # Look for patterns like:
-    # "12.5k/200k" or "12500/200000" or "Context: 12.5k / 200k"
-    # The Claude CLI shows context in the status area
+    # Claude Code shows context in various formats in the status line:
+    # - "45.2k / 200k" or "45.2k/200k"
+    # - "Context: 12.5k / 200k"
+    # - Unicode characters like "◐ 45.2k/200k"
+    # - Progress indicators
+    # - "12500 / 200000 tokens"
 
     patterns = [
-        # Pattern: "45.2k / 200k" or "45.2k/200k"
-        r'(\d+(?:\.\d+)?k?)\s*/\s*(\d+(?:\.\d+)?k)',
-        # Pattern: "Context: 45200 / 200000"
+        # Pattern: "45.2k / 200k" or "45.2k/200k" with optional k suffix
+        r'(\d+(?:\.\d+)?)\s*k?\s*/\s*(\d+(?:\.\d+)?)\s*k',
+        # Pattern with explicit 'k' on both sides
+        r'(\d+(?:\.\d+)?)k\s*/\s*(\d+(?:\.\d+)?)k',
+        # Pattern: raw numbers like "45200 / 200000"
+        r'(\d{4,})\s*/\s*(\d{4,})',
+        # Pattern: "Context: ..." prefix
         r'[Cc]ontext[:\s]+(\d+(?:\.\d+)?k?)\s*/\s*(\d+(?:\.\d+)?k?)',
         # Pattern with tokens label
         r'(\d+(?:\.\d+)?k?)\s*(?:tokens?\s*)?/\s*(\d+(?:\.\d+)?k?)\s*(?:tokens?)?',
+        # Pattern: percentage with total like "50% of 200k"
+        r'(\d+)%\s*(?:of\s*)?(\d+(?:\.\d+)?k)',
     ]
 
     for pattern in patterns:
         matches = re.findall(pattern, pane_content)
         if matches:
             # Take the last match (most recent)
-            used_str, total_str = matches[-1]
+            match = matches[-1]
+            used_str, total_str = match[0], match[1]
 
             def parse_k(s):
-                s = s.lower().strip()
+                s = str(s).lower().strip()
                 if s.endswith('k'):
                     return float(s[:-1]) * 1000
-                return float(s)
+                val = float(s)
+                # If it's a small number but we expect tokens, might be 'k' implied
+                # Numbers over 100 are likely raw token counts
+                return val
 
             try:
                 used = parse_k(used_str)
                 total = parse_k(total_str)
-                pct = (used / total * 100) if total > 0 else 0
-                return used, total, pct
+
+                # Handle percentage pattern
+                if '%' in pattern:
+                    pct = float(used_str)
+                    used = total * pct / 100
+                else:
+                    pct = (used / total * 100) if total > 0 else 0
+
+                # Sanity check: total should be reasonable (1k to 500k range)
+                if 1000 <= total <= 500000:
+                    return used, total, pct
             except (ValueError, ZeroDivisionError):
                 continue
 
@@ -150,7 +188,11 @@ def load_orchestration_state() -> dict:
     """Load main orchestration state."""
     state_file = Path(".orchestration-state.json")
     if state_file.exists():
-        return json.loads(state_file.read_text())
+        try:
+            return json.loads(state_file.read_text())
+        except json.JSONDecodeError:
+            # File might be partially written, return empty
+            return {}
     return {}
 
 
@@ -158,7 +200,11 @@ def load_task_status(task_id: str) -> dict:
     """Load individual task status from worktree."""
     status_file = Path(f".worktrees/{task_id}/.task-status.json")
     if status_file.exists():
-        return json.loads(status_file.read_text())
+        try:
+            return json.loads(status_file.read_text())
+        except json.JSONDecodeError:
+            # File might be partially written, return empty
+            return {}
     return {}
 
 
