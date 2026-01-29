@@ -166,73 +166,76 @@ cat > .worktrees/<task-id>/.task-status.json << 'EOF'
 EOF
 ```
 
-## Stage 2: Spawn Workers (PARALLEL VIA TASK TOOL)
+## Stage 2: Spawn Workers (VIA TMUX SESSIONS)
 
-**Use Task tool with `run_in_background: true` to spawn workers in parallel.**
+**CRITICAL: DO NOT use the Task tool for workers.** The Task tool creates internal subprocesses that are invisible to the dashboard and monitoring tools.
 
-**CRITICAL: Always use these flags when spawning workers in headless/tmux mode:**
-- `--dangerously-skip-permissions` - Bypass all permission prompts
-- `--permission-mode bypassPermissions` - Enable full bypass mode
+**Instead, spawn workers using tmux directly so the dashboard can track them:**
+
+```bash
+# First, ensure signals directory exists
+mkdir -p .orchestrator/signals
+
+# Create a tmux session for each worker
+python3 ~/.claude/orchestrator_code/tmux.py create-session worker-<task-id> --cwd .worktrees/<task-id>
+```
 
 For each wave of tasks (tasks whose dependencies are satisfied):
 
 ### Spawning a Single Worker
 
-```
-Task tool parameters:
-- subagent_type: "worker"
-- model: "sonnet" (or "haiku" for simple tasks)
-- run_in_background: true
-- prompt: |
-    Execute task: <task-id>
+```bash
+# 1. Create the tmux session
+python3 ~/.claude/orchestrator_code/tmux.py create-session worker-<task-id> --cwd .worktrees/<task-id>
 
-    Working directory: <absolute path to project>/.worktrees/<task-id>
+# 2. Send the claude command to the session
+tmux send-keys -t worker-<task-id> 'claude --dangerously-skip-permissions --print "Execute task: <task-id>
 
-    ## Task Specification
-    <paste full task spec from tasks.yaml including:
-     - description
-     - files_write
-     - files_read
-     - verification commands>
+Working directory: <absolute path to project>/.worktrees/<task-id>
 
-    ## Environment
-    - Branch: task/<task-id>
-    - Environment hash: <env-hash>
+## Task Specification
+<paste full task spec from tasks.yaml>
 
-    ## Instructions
-    1. cd to the worktree directory
-    2. Read existing files before modifying
-    3. Implement the required changes
-    4. Run verification commands
-    5. Update .task-status.json when complete:
-       {"task_id": "<task-id>", "status": "completed", "completed_at": "<ISO timestamp>"}
-    6. Stay within your file boundaries (files_write)
+## Instructions
+1. Implement the required changes
+2. Run verification commands
+3. Signal completion: touch .orchestrator/signals/<task-id>.done
+4. Update .task-status.json to completed
+"' Enter
 ```
 
 ### Spawning Multiple Workers in Parallel
 
-To spawn Wave 1 tasks in parallel, call Task tool multiple times in a SINGLE message:
+For Wave 1, create all tmux sessions first, then send commands:
 
-```
-[In one message, include multiple Task tool calls:]
+```bash
+# Create all sessions
+python3 ~/.claude/orchestrator_code/tmux.py create-session worker-task-a --cwd .worktrees/task-a
+python3 ~/.claude/orchestrator_code/tmux.py create-session worker-task-b --cwd .worktrees/task-b
+python3 ~/.claude/orchestrator_code/tmux.py create-session worker-task-c --cwd .worktrees/task-c
 
-Task 1:
-- subagent_type: "worker"
-- run_in_background: true
-- prompt: "Execute task: task-a ..."
-
-Task 2:
-- subagent_type: "worker"
-- run_in_background: true
-- prompt: "Execute task: task-b ..."
-
-Task 3:
-- subagent_type: "worker"
-- run_in_background: true
-- prompt: "Execute task: task-c ..."
+# Then send commands to each (they run in parallel)
+tmux send-keys -t worker-task-a 'claude --dangerously-skip-permissions --print "Execute task: task-a..."' Enter
+tmux send-keys -t worker-task-b 'claude --dangerously-skip-permissions --print "Execute task: task-b..."' Enter
+tmux send-keys -t worker-task-c 'claude --dangerously-skip-permissions --print "Execute task: task-c..."' Enter
 ```
 
-Each Task call returns an `output_file` path. Save these paths for monitoring.
+**Key flags for headless execution:**
+- `--dangerously-skip-permissions` - Bypasses all permission prompts
+- `--print` - Non-interactive mode, prints output and exits
+
+### Monitoring Workers via Dashboard
+
+```bash
+# The dashboard can now see all workers:
+python3 ~/.claude/orchestrator_code/dashboard.py
+
+# View specific worker output:
+tmux capture-pane -t worker-<task-id> -p | tail -50
+
+# Kill a stuck worker:
+tmux kill-session -t worker-<task-id>
+```
 
 ## Stage 3: Monitor Progress
 

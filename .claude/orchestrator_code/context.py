@@ -89,12 +89,18 @@ def load_context(project_dir: Optional[str] = None) -> dict:
 
 
 def save_context(context: dict, project_dir: Optional[str] = None) -> None:
-    """Save the context to disk."""
+    """Save the context to disk with file locking to prevent race conditions."""
+    import fcntl
+    
     context_path = get_context_path(project_dir)
     context["updated_at"] = datetime.now().isoformat()
 
     with open(context_path, 'w') as f:
-        json.dump(context, f, indent=2)
+        fcntl.flock(f, fcntl.LOCK_EX)  # Exclusive lock
+        try:
+            json.dump(context, f, indent=2)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)  # Always unlock
 
 
 def add_entry(key: str, value: Any, agent: str = "unknown", project_dir: Optional[str] = None) -> None:

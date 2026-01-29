@@ -64,7 +64,16 @@ def create_worker_session(session_name: str, cwd: str = None) -> dict:
         
         # Source shell profile to ensure conda/claude are available
         # This is critical for macOS where PATH isn't set in non-interactive shells
-        init_cmd = "source ~/.zshrc || source ~/.bash_profile || true"
+        # NOTE: Many .zshrc files have `[[ $- != *i* ]] && return` which exits early
+        # in non-interactive shells. We explicitly source conda first to avoid this.
+        init_cmd = (
+            "source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || "
+            "source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || "
+            "source /opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh 2>/dev/null || "
+            "source ~/.zshrc 2>/dev/null || "
+            "source ~/.bash_profile 2>/dev/null || "
+            "true"
+        )
         subprocess.run(
             ["tmux", "send-keys", "-t", session_name, init_cmd, "Enter"],
             capture_output=True, check=False
