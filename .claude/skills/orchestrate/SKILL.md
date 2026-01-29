@@ -155,3 +155,18 @@ Python scripts in `~/.claude/orchestrator_code/`:
 | `environment.py` | Compute/verify env hash |
 | `tasks.py` | Check task readiness |
 | `verify.py` | Full verification suite |
+| `context.py` | Shared knowledge store (with file locking) |
+| `git.py` | Git operations with abort_merge() |
+| `worktree.py` | Worktree management with auto-abort |
+
+### tmux.py Commands (Headless Execution)
+
+| Command | Purpose |
+|---------|---------|
+| `tmux.py spawn-worker <id> --prompt-file <f> --cwd <d>` | Spawn worker with verified startup |
+| `tmux.py verify-running <session>` | Check if process is running (not crashed) |
+| `tmux.py monitor <id> --signal-file <f> --timeout <s>` | Poll with timeout enforcement |
+| `tmux.py save-logs <session>` | Save pane output before cleanup |
+| `tmux.py cleanup-signals` | Remove old .done/.verified files |
+| `tmux.py cleanup-orphans` | Kill orphaned worker sessions |
+| `tmux.py list` | List all worker-* sessions |
