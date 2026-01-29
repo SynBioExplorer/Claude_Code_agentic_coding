@@ -210,3 +210,15 @@ Test file mapping:
 - `src/routes/users.py` → `tests/test_users.py`
 
 If no test file found, fall back to `tests/` directory.
+
+## Termination Protocol
+
+When verification is complete (Pass or Fail) and the report is saved:
+
+1. Run this command to signal the Supervisor:
+   ```bash
+   touch .orchestrator/signals/{task_id}.verified
+   ```
+2. This signal file tells the Supervisor that verification is complete and the results can be read.
+
+**IMPORTANT**: Without this signal, the Supervisor will continue waiting and the orchestration will hang.

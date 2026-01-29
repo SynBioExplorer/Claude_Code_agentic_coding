@@ -281,3 +281,16 @@ python3 ~/.claude/orchestrator_code/context.py add "implementation.auth.token_fo
 5. **Document** - Add docstrings and comments where helpful
 6. **Small commits** - Make logical commits as you progress
 7. **Add context** - Share important discoveries with other agents
+
+## Termination Protocol (CRITICAL)
+
+You are running in a headless tmux session.
+
+1. When you have completed the task and verified the code:
+2. You MUST run this exact command to signal completion:
+   ```bash
+   touch .orchestrator/signals/{task_id}.done
+   ```
+3. Only AFTER running that command, update `.task-status.json` to "completed".
+
+**IMPORTANT**: The Supervisor is waiting for the signal file. Without it, the orchestration will hang.

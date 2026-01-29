@@ -170,6 +170,10 @@ EOF
 
 **Use Task tool with `run_in_background: true` to spawn workers in parallel.**
 
+**CRITICAL: Always use these flags when spawning workers in headless/tmux mode:**
+- `--dangerously-skip-permissions` - Bypass all permission prompts
+- `--permission-mode bypassPermissions` - Enable full bypass mode
+
 For each wave of tasks (tasks whose dependencies are satisfied):
 
 ### Spawning a Single Worker
@@ -257,10 +261,28 @@ tail -100 <output_file_path>
 
 ### Polling Strategy
 
+**Primary: Check for signal files (most reliable for headless execution):**
+
+```bash
+# Check for completion signals - this is the PRIMARY indicator
+ls -la .orchestrator/signals/*.done 2>/dev/null
+
+# Check for verification signals
+ls -la .orchestrator/signals/*.verified 2>/dev/null
+```
+
+**Secondary: Check task status files:**
+
 1. Wait 30-60 seconds between checks
-2. Check `.task-status.json` for each active task
-3. When status changes to "completed", proceed to verification
-4. When status changes to "failed", log error and decide whether to retry
+2. Check `.orchestrator/signals/{task_id}.done` as the PRIMARY completion indicator
+3. Fall back to `.task-status.json` for detailed status info
+4. When signal file appears, proceed to verification
+5. When status changes to "failed", log error and decide whether to retry
+
+**Ensure signals directory exists before spawning:**
+```bash
+mkdir -p .orchestrator/signals
+```
 
 ## Stage 4: Verify Completed Tasks
 
