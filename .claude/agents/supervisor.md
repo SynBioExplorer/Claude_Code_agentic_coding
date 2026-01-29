@@ -137,6 +137,10 @@ Validate:
 ## Stage 0.5: Environment Setup
 
 ```bash
+# CRITICAL: Clean up any orphaned sessions and old signals from previous runs
+python3 ~/.claude/orchestrator_code/tmux.py cleanup-orphans
+python3 ~/.claude/orchestrator_code/tmux.py cleanup-signals
+
 # Install dependencies if needed
 uv sync  # or npm install, etc.
 
@@ -145,6 +149,11 @@ python3 ~/.claude/orchestrator_code/environment.py
 
 # Initialize orchestration state
 python3 ~/.claude/orchestrator_code/state.py init "User request" tasks.yaml
+
+# Ensure required directories exist
+mkdir -p .orchestrator/signals
+mkdir -p .orchestrator/logs
+mkdir -p .orchestrator/prompts
 ```
 
 ## Stage 1: Create Worktrees
@@ -170,56 +179,76 @@ EOF
 
 **CRITICAL: DO NOT use the Task tool for workers.** The Task tool creates internal subprocesses that are invisible to the dashboard and monitoring tools.
 
-**Instead, spawn workers using tmux directly so the dashboard can track them:**
+**Use file-based prompts to avoid shell escaping issues:**
+
+### Pre-flight Setup
 
 ```bash
-# First, ensure signals directory exists
+# Ensure directories exist (should already be done in Stage 0.5)
 mkdir -p .orchestrator/signals
-
-# Create a tmux session for each worker
-python3 ~/.claude/orchestrator_code/tmux.py create-session worker-<task-id> --cwd .worktrees/<task-id>
+mkdir -p .orchestrator/prompts
 ```
 
 For each wave of tasks (tasks whose dependencies are satisfied):
 
-### Spawning a Single Worker
+### Spawning a Single Worker (Recommended Method)
 
-1. **Create the Session:**
+1. **Write the prompt to a file** (avoids shell escaping issues):
 ```bash
-python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-<task-id>" --cwd "<absolute_path_to_worktree>"
+cat > .orchestrator/prompts/<task-id>.md << 'EOF'
+Execute task <task-id>.
+
+Working directory: <absolute_path_to_worktree>
+
+## Task Specification
+<paste full task spec from tasks.yaml>
+
+## Instructions
+1. Read .task-status.json context first
+2. Implement the required changes
+3. Run verification commands
+4. Signal completion: touch .orchestrator/signals/<task-id>.done
+5. Update .task-status.json to completed
+EOF
 ```
 
-2. **Send the Agent Command:**
+2. **Spawn the worker with verification:**
 ```bash
-# Send the command to the specific session
-# We use raw tmux send-keys because tmux.py only handles session creation
-tmux send-keys -t "worker-<task-id>" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task <task-id>. Read .task-status.json context first. When done, touch .orchestrator/signals/<task-id>.done'" Enter
+python3 ~/.claude/orchestrator_code/tmux.py spawn-worker <task-id> \
+    --prompt-file .orchestrator/prompts/<task-id>.md \
+    --cwd .worktrees/<task-id>
 ```
 
-3. **Verify the session exists:**
-```bash
-tmux has-session -t "worker-<task-id>"
-```
+This command:
+- Creates the tmux session
+- Sources shell profiles (conda, etc.)
+- Sends the claude command with the prompt file
+- Verifies the process actually started (checks for errors)
 
 ### Spawning Multiple Workers in Parallel
 
-For Wave 1, create all tmux sessions first, then send commands:
+For Wave 1, create all prompt files first, then spawn:
 
 ```bash
-# Create all sessions
-python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-task-a" --cwd ".worktrees/task-a"
-python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-task-b" --cwd ".worktrees/task-b"
-python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-task-c" --cwd ".worktrees/task-c"
+# Create prompt files for all tasks in this wave
+for task_id in task-a task-b task-c; do
+    cat > .orchestrator/prompts/${task_id}.md << EOF
+Execute task ${task_id}.
+Working directory: $(pwd)/.worktrees/${task_id}
 
-# Verify sessions exist
-tmux has-session -t "worker-task-a"
-tmux has-session -t "worker-task-b"
-tmux has-session -t "worker-task-c"
+## Instructions
+1. Read .task-status.json context first
+2. Implement the required changes
+3. Run verification commands
+4. Signal completion: touch .orchestrator/signals/${task_id}.done
+5. Update .task-status.json to completed
+EOF
+done
 
-# Then send commands to each (they run in parallel)
-tmux send-keys -t "worker-task-a" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task task-a. Read .task-status.json context first. When done, touch .orchestrator/signals/task-a.done'" Enter
-tmux send-keys -t "worker-task-b" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task task-b. Read .task-status.json context first. When done, touch .orchestrator/signals/task-b.done'" Enter
-tmux send-keys -t "worker-task-c" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task task-c. Read .task-status.json context first. When done, touch .orchestrator/signals/task-c.done'" Enter
+# Spawn all workers (they run in parallel)
+python3 ~/.claude/orchestrator_code/tmux.py spawn-worker task-a --prompt-file .orchestrator/prompts/task-a.md --cwd .worktrees/task-a
+python3 ~/.claude/orchestrator_code/tmux.py spawn-worker task-b --prompt-file .orchestrator/prompts/task-b.md --cwd .worktrees/task-b
+python3 ~/.claude/orchestrator_code/tmux.py spawn-worker task-c --prompt-file .orchestrator/prompts/task-c.md --cwd .worktrees/task-c
 ```
 
 **Key flags for headless execution:**
@@ -236,15 +265,41 @@ python3 ~/.claude/orchestrator_code/dashboard.py
 # View specific worker output:
 tmux capture-pane -t worker-<task-id> -p | tail -50
 
+# Verify a worker is still running:
+python3 ~/.claude/orchestrator_code/tmux.py verify-running worker-<task-id>
+
+# Save worker logs before killing:
+python3 ~/.claude/orchestrator_code/tmux.py save-logs worker-<task-id>
+
 # Kill a stuck worker:
 tmux kill-session -t worker-<task-id>
 ```
 
 ## Stage 3: Monitor Progress
 
-After spawning workers, monitor their progress:
+After spawning workers, monitor their progress with timeout enforcement:
 
-### Check Task Status Files
+### Automated Monitoring with Timeout (Recommended)
+
+Use the built-in monitor command that handles timeout and cleanup:
+
+```bash
+# Monitor a single task with 30-minute timeout
+python3 ~/.claude/orchestrator_code/tmux.py monitor <task-id> \
+    --signal-file .orchestrator/signals/<task-id>.done \
+    --timeout 1800
+
+# This will:
+# - Poll for the signal file every 30 seconds
+# - Kill the worker and save logs if timeout exceeded
+# - Return exit code 1 if failed/timeout
+```
+
+### Manual Monitoring
+
+If you prefer manual control:
+
+#### Check Task Status Files
 
 ```bash
 # Check all task statuses
@@ -254,20 +309,7 @@ python3 ~/.claude/orchestrator_code/tasks.py check-all
 cat .worktrees/<task-id>/.task-status.json
 ```
 
-### Check Worker Output Files
-
-Use the `output_file` paths returned by Task tool:
-
-```bash
-# Check worker output (use tail to see recent output)
-tail -100 <output_file_path>
-
-# Or use Read tool to read the full output
-```
-
-### Polling Strategy
-
-**Primary: Check for signal files (most reliable for headless execution):**
+#### Check for Signal Files
 
 ```bash
 # Check for completion signals - this is the PRIMARY indicator
@@ -277,18 +319,37 @@ ls -la .orchestrator/signals/*.done 2>/dev/null
 ls -la .orchestrator/signals/*.verified 2>/dev/null
 ```
 
-**Secondary: Check task status files:**
+#### Verify Worker Health
+
+```bash
+# Check if worker is still running (not crashed)
+python3 ~/.claude/orchestrator_code/tmux.py verify-running worker-<task-id>
+
+# View recent output
+tmux capture-pane -t worker-<task-id> -p | tail -50
+```
+
+### Timeout Handling
+
+If a worker exceeds the timeout:
+
+1. Logs are automatically saved to `.orchestrator/logs/`
+2. The session is killed
+3. Task should be marked as failed and optionally retried
+
+```bash
+# Manual timeout check - save logs and kill if stuck
+python3 ~/.claude/orchestrator_code/tmux.py save-logs worker-<task-id>
+tmux kill-session -t worker-<task-id>
+```
+
+### Polling Strategy
 
 1. Wait 30-60 seconds between checks
 2. Check `.orchestrator/signals/{task_id}.done` as the PRIMARY completion indicator
-3. Fall back to `.task-status.json` for detailed status info
+3. Verify worker health periodically with `verify-running`
 4. When signal file appears, proceed to verification
-5. When status changes to "failed", log error and decide whether to retry
-
-**Ensure signals directory exists before spawning:**
-```bash
-mkdir -p .orchestrator/signals
-```
+5. When status changes to "failed" or timeout occurs, log error and decide whether to retry
 
 ## Stage 4: Verify Completed Tasks
 
