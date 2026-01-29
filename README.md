@@ -98,6 +98,7 @@ Standalone Python scripts in `~/.claude/orchestrator_code/`:
 | `tasks.py` | Check task readiness | `python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml` |
 | `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
 | `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
+| `workers_view.py` | Live worker output panels | `python3 ~/.claude/orchestrator_code/workers_view.py` |
 | `monitoring.py` | Open/manage monitoring windows | `python3 ~/.claude/orchestrator_code/monitoring.py open` |
 
 All scripts support `--json` for machine-readable output.
@@ -118,6 +119,54 @@ python3 ~/.claude/orchestrator_code/dashboard.py --once
 ```
 
 Requires `rich` library: `pip install rich`
+
+**Dashboard Output:**
+
+```
+                              ORCHESTRATION STATUS
+╭───────────────────┬───────────────┬──────────┬──────────────────┬────────────╮
+│ Task              │ Status        │ Agent    │ Context          │ Progress   │
+├───────────────────┼───────────────┼──────────┼──────────────────┼────────────┤
+│ task-auth-service │ ● executing   │ worker   │ 45.2k/200.0k     │ Working... │
+│                   │               │          │ (23%)            │            │
+│ task-auth-routes  │ ● executing   │ worker   │ 12.1k/200.0k     │ Working... │
+│                   │               │          │ (6%)             │            │
+│ task-user-model   │ ✓ verified    │ done     │ -                │ Complete   │
+│ task-api-tests    │ ○ pending     │ -        │ -                │ Waiting... │
+╰───────────────────┴───────────────┴──────────┴──────────────────┴────────────╯
+                           Request: Add user authentication
+  Phase: executing  │  Elapsed: 3m 42s  │  Active: 2  │  Done: 1  │  Failed: 0
+                                  Ctx: 57.3k/400.0k
+```
+
+### Workers View
+
+Live output from all workers (uses `capture-pane`, avoids tmux attach issues):
+
+```bash
+python3 ~/.claude/orchestrator_code/workers_view.py
+```
+
+**Workers View Output:**
+
+```
+WORKERS VIEW (Ctrl+C to exit)
+Found 3 worker sessions
+
+┌─────────────────────────────────┬─────────────────────────────────┐
+│ task-auth-service               │ task-auth-routes                │
+│                                 │                                 │
+│ Implementing login method...    │ Adding /login endpoint...       │
+│ ⠋ Writing src/services/auth.py │ ⠙ Reading contract interface    │
+│                                 │                                 │
+├─────────────────────────────────┴─────────────────────────────────┤
+│ task-user-model                                                   │
+│                                                                   │
+│ ✓ Task completed successfully                                     │
+│ Tests passed: 12/12                                               │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+```
 
 ### Auto-Opening Monitoring Windows
 
@@ -313,13 +362,11 @@ python3 ~/.claude/orchestrator_code/state.py status
 
 ### View monitoring windows
 ```bash
-# Dashboard window
-tmux attach -t "orchestrator-dashboard"
+# Dashboard (runs directly, no tmux)
+python3 ~/.claude/orchestrator_code/dashboard.py
 
-# Workers window
-tmux attach -t "orchestrator-workers"
-
-# Detach with Ctrl-b d
+# Workers view (uses capture-pane, avoids tmux attach crash on macOS/conda)
+python3 ~/.claude/orchestrator_code/workers_view.py
 ```
 
 ### List tmux worker sessions
@@ -329,8 +376,11 @@ tmux list-sessions | grep "worker-"
 
 ### View worker output
 ```bash
-tmux attach -t "worker-<task-id>"
-# Detach with Ctrl-b d
+# Recommended: use capture-pane (no crash)
+tmux capture-pane -t "worker-<task-id>" -p | tail -30
+
+# Or use workers_view.py for live multi-pane view
+python3 ~/.claude/orchestrator_code/workers_view.py
 ```
 
 ### Kill stuck worker
@@ -346,13 +396,29 @@ git worktree remove .worktrees/<task-id>
 
 ### Kill all orchestration sessions
 ```bash
-# Kill monitoring windows
-tmux kill-session -t "orchestrator-dashboard" 2>/dev/null
-tmux kill-session -t "orchestrator-workers" 2>/dev/null
-
 # Kill all worker sessions
 tmux list-sessions -F '#{session_name}' | grep '^worker-' | xargs -I {} tmux kill-session -t {}
+
+# Clean up stale tmux socket (if server crashed)
+rm -f /private/tmp/tmux-$(id -u)/default
 ```
+
+### tmux "server exited unexpectedly" (macOS with conda)
+
+If you see this error when attaching to tmux sessions, it's a known bug with conda's tmux package on macOS. The monitoring system works around this by using `capture-pane` instead of `attach`:
+
+```bash
+# Don't use attach (crashes):
+# tmux attach -t worker-task-a  # ❌ crashes
+
+# Use capture-pane instead (works):
+tmux capture-pane -t worker-task-a -p  # ✓ works
+
+# Or use the workers view:
+python3 ~/.claude/orchestrator_code/workers_view.py  # ✓ works
+```
+
+To fix permanently, install Homebrew's tmux: `brew install tmux`
 
 ## License
 
