@@ -245,6 +245,49 @@ When you have completed your planning:
 5. **If risk ≤ 25**: Auto-approve, spawn Supervisor
 6. **If risk > 25**: Ask user for approval before spawning Supervisor
 
+## Spawning the Supervisor
+
+When plan is approved (either auto-approved with risk ≤ 25, or user-approved):
+
+**IMPORTANT: Do NOT attempt to execute tasks yourself. You MUST delegate to the Supervisor agent.**
+
+Use the Task tool to spawn the Supervisor:
+
+```
+Task tool parameters:
+- subagent_type: "supervisor"
+- model: "sonnet"
+- prompt: |
+    Execute the orchestration plan in tasks.yaml.
+
+    Project directory: <absolute path to project root>
+    Environment hash: <hash from python3 ~/.claude/orchestrator_code/environment.py>
+
+    Follow your execution flow:
+    1. Stage 0: Initialize (validate DAG)
+    2. Stage 0.5: Environment setup
+    3. Stage 1: Create worktrees
+    4. Stage 2: Spawn workers in tmux
+    5. Stage 3-6: Monitor, verify, merge, review
+
+    Original request: <user's original request>
+```
+
+The Supervisor will:
+1. Create git worktrees for each task
+2. Spawn worker agents in tmux sessions (true parallelism)
+3. Monitor progress and handle verification
+4. Merge verified tasks
+5. Call you back in REVIEW MODE when complete
+
+**Do NOT:**
+- Create tmux sessions yourself
+- Create worktrees yourself
+- Write implementation code yourself
+- Poll for task status yourself
+
+These are the Supervisor's responsibilities.
+
 When in Review Mode, evaluate the merged work and either:
 - Approve and complete the orchestration
 - Reject with specific feedback for iteration (max 3 iterations total)

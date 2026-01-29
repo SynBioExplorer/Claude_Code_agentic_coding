@@ -1,1 +1,0 @@
-"""Verification and boundary enforcement."""
