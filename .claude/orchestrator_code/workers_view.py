@@ -32,18 +32,22 @@ def get_worker_sessions():
     """
     try:
         workers = []
+        individual_sessions = set()
 
-        # First, look for individual worker-* sessions
+        # First, look for individual worker-* sessions (single window each)
         result = subprocess.run(
             ["tmux", "list-sessions", "-F", "#{session_name}"],
             capture_output=True, text=True
         )
         if result.returncode == 0:
             sessions = result.stdout.strip().split("\n")
-            workers.extend([s for s in sessions if s.startswith("worker-")])
+            for s in sessions:
+                if s.startswith("worker-") or s.startswith("task-"):
+                    workers.append(s)
+                    individual_sessions.add(s)
 
         # Also check for multi-window sessions (e.g., phase5-workers)
-        # and list their windows as separate "workers"
+        # Only add windows if session wasn't already added as individual worker
         result = subprocess.run(
             ["tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index}:#{window_name}"],
             capture_output=True, text=True
@@ -57,7 +61,10 @@ def get_worker_sessions():
                     session = parts[0]
                     window_idx = parts[1]
                     window_name = parts[2]
-                    # Include windows from worker-related sessions
+                    # Skip if this session was already added as individual worker
+                    if session in individual_sessions:
+                        continue
+                    # Include windows from orchestration-related sessions
                     if "worker" in session.lower() or "phase" in session.lower():
                         target = f"{session}:{window_idx}"
                         if target not in workers:
