@@ -176,12 +176,37 @@ def format_context(used, total, pct) -> Text:
 
 
 def get_session_context(task_id: str) -> tuple:
-    """Get context usage for a worker session."""
+    """Get context usage for a worker session.
+
+    First tries to read from .task-status.json (most reliable).
+    Falls back to parsing tmux pane content if available.
+    """
+    # Try reading from task status file first (worker self-reports)
+    task_status = load_task_status(task_id)
+    if task_status:
+        ctx = task_status.get("context_estimate") or {}
+        approx_tokens = ctx.get("approx_tokens") if ctx else None
+        if approx_tokens:
+            # Assume 200k context window for workers
+            total = 200000
+            used = approx_tokens
+            pct = (used / total * 100) if total > 0 else 0
+            return used, total, pct
+
+    # Fall back to parsing tmux pane
     session_name = f"worker-{task_id}"
     content = get_tmux_pane_content(session_name)
     if content:
         return parse_context_usage(content)
     return None, None, None
+
+
+def get_last_activity(task_id: str) -> str:
+    """Get last activity from task status file."""
+    task_status = load_task_status(task_id)
+    if task_status:
+        return task_status.get("last_activity", "")
+    return ""
 
 
 def load_orchestration_state() -> dict:
@@ -442,6 +467,10 @@ def build_simple_dashboard() -> Table:
                 if used and total:
                     total_context_used += used
                     total_context_max += total
+                # Show last activity if available
+                last_activity = get_last_activity(task_id)
+                if last_activity:
+                    progress = last_activity[:35]
             else:
                 context_text = Text("-", style="dim")
 

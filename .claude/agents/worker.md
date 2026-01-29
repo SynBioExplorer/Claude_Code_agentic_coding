@@ -114,7 +114,7 @@ Instead of directly editing `main.py`, record your intent:
 The Supervisor will apply these intents using the framework adapter.
 
 ### 5. Update Status
-Keep `.task-status.json` updated:
+Keep `.task-status.json` updated frequently (at least every major step):
 
 ```json
 {
@@ -124,7 +124,14 @@ Keep `.task-status.json` updated:
     "files_created": ["src/services/auth.py"],
     "files_modified": ["src/routes/__init__.py"],
     "tests_written": ["tests/test_auth.py"]
-  }
+  },
+  "context_estimate": {
+    "files_read": 5,
+    "files_written": 2,
+    "approx_tokens": 15000
+  },
+  "last_activity": "Writing auth service implementation",
+  "updated_at": "<ISO timestamp>"
 }
 ```
 
@@ -193,11 +200,18 @@ You MUST NOT:
   },
   "started_at": "ISO timestamp",
   "completed_at": "ISO timestamp | null",
+  "updated_at": "ISO timestamp",
   "progress": {
     "files_created": ["string"],
     "files_modified": ["string"],
     "tests_written": ["string"]
   },
+  "context_estimate": {
+    "files_read": "number",
+    "files_written": "number",
+    "approx_tokens": "number (estimate: ~1000 per file read, ~500 per file written)"
+  },
+  "last_activity": "string (brief description of current step)",
   "patch_intents_applied": [
     {
       "file": "string",
