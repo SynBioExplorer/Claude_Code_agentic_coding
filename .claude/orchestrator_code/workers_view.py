@@ -24,25 +24,59 @@ except ImportError:
 
 
 def get_worker_sessions():
-    """Get list of worker tmux sessions."""
+    """Get list of worker tmux sessions or windows.
+
+    Detects both:
+    - Individual sessions: worker-task-a, worker-task-b, etc.
+    - Multi-window sessions: phase5-workers with multiple windows
+    """
     try:
+        workers = []
+
+        # First, look for individual worker-* sessions
         result = subprocess.run(
             ["tmux", "list-sessions", "-F", "#{session_name}"],
             capture_output=True, text=True
         )
         if result.returncode == 0:
             sessions = result.stdout.strip().split("\n")
-            return [s for s in sessions if s.startswith("worker-")]
-        return []
+            workers.extend([s for s in sessions if s.startswith("worker-")])
+
+        # Also check for multi-window sessions (e.g., phase5-workers)
+        # and list their windows as separate "workers"
+        result = subprocess.run(
+            ["tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index}:#{window_name}"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split(":")
+                if len(parts) >= 3:
+                    session = parts[0]
+                    window_idx = parts[1]
+                    window_name = parts[2]
+                    # Include windows from worker-related sessions
+                    if "worker" in session.lower() or "phase" in session.lower():
+                        target = f"{session}:{window_idx}"
+                        if target not in workers:
+                            workers.append(target)
+
+        return workers if workers else []
     except Exception:
         return []
 
 
-def capture_pane(session_name: str, lines: int = 20) -> str:
-    """Capture recent output from a tmux session."""
+def capture_pane(target: str, lines: int = 20) -> str:
+    """Capture recent output from a tmux session or window.
+
+    Args:
+        target: Either "session_name" or "session_name:window_index"
+    """
     try:
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", session_name, "-p", "-S", f"-{lines}"],
+            ["tmux", "capture-pane", "-t", target, "-p", "-S", f"-{lines}"],
             capture_output=True, text=True
         )
         if result.returncode == 0:
@@ -50,7 +84,7 @@ def capture_pane(session_name: str, lines: int = 20) -> str:
             output = result.stdout.strip()
             output_lines = output.split("\n")
             return "\n".join(output_lines[-lines:])
-        return f"[Session not found: {session_name}]"
+        return f"[Target not found: {target}]"
     except Exception as e:
         return f"[Error: {e}]"
 
