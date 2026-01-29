@@ -18,6 +18,7 @@ tools:
   # general utilities
   - Bash(cat:*)
   - Bash(ls:*)
+  - Bash(touch:*)
 model: sonnet
 ---
 
@@ -211,14 +212,18 @@ Test file mapping:
 
 If no test file found, fall back to `tests/` directory.
 
-## Termination Protocol
+## Termination Protocol (CRITICAL)
 
-When verification is complete (Pass or Fail) and the report is saved:
+You are running in a headless tmux session. When verification is complete:
 
-1. Run this command to signal the Supervisor:
+1. Create the signal file using the ABSOLUTE path provided in your prompt:
    ```bash
-   touch .orchestrator/signals/{task_id}.verified
+   touch /absolute/path/to/project/.orchestrator/signals/<task-id>.verified
    ```
-2. This signal file tells the Supervisor that verification is complete and the results can be read.
+2. The signal file tells the Supervisor that verification is complete
 
-**IMPORTANT**: Without this signal, the Supervisor will continue waiting and the orchestration will hang.
+**CRITICAL NOTES:**
+- Look for "Signal file:" in your prompt for the exact path
+- Use absolute paths, not relative
+- Without the signal file, orchestration will hang
+- Create signal file for BOTH pass and fail results

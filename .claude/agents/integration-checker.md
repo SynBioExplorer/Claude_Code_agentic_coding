@@ -29,6 +29,7 @@ tools:
   - Bash(cat:*)
   - Bash(ls:*)
   - Bash(which:*)
+  - Bash(touch:*)
 model: sonnet
 ---
 
@@ -219,3 +220,19 @@ Run:
 
 Report pass/fail for each check.
 ```
+
+## Termination Protocol (CRITICAL)
+
+You are running in a headless tmux session. When integration checks are complete:
+
+1. Create the signal file using the ABSOLUTE path provided in your prompt:
+   ```bash
+   touch /absolute/path/to/project/.orchestrator/signals/integration.done
+   ```
+2. The signal file tells the Supervisor that integration check is complete
+
+**CRITICAL NOTES:**
+- Look for "Signal file:" in your prompt for the exact path
+- Use absolute paths, not relative
+- Without the signal file, orchestration will hang
+- Create signal file for BOTH pass and fail results

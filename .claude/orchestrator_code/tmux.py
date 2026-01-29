@@ -334,36 +334,57 @@ def spawn_worker_with_prompt_file(
     verify_startup: bool = True
 ) -> dict:
     """Spawn a worker using a prompt file instead of inline command.
-    
+
     This avoids shell escaping issues with complex prompts.
-    
+
     Args:
         task_id: Task identifier
         prompt_file: Path to file containing the prompt
         cwd: Working directory (worktree path)
         verify_startup: Whether to verify the process started (default True)
-        
+
     Returns:
         dict with success status and verification results
     """
-    session_name = f"worker-{task_id}"
-    
+    return spawn_agent(f"worker-{task_id}", prompt_file, cwd, verify_startup)
+
+
+def spawn_agent(
+    session_name: str,
+    prompt_file: str,
+    cwd: str,
+    verify_startup: bool = True
+) -> dict:
+    """Spawn any agent type using a prompt file.
+
+    Generic function for spawning workers, verifiers, integration-checkers, etc.
+    All agents are spawned with --dangerously-skip-permissions for headless execution.
+
+    Args:
+        session_name: Tmux session name (e.g., "worker-task-a", "verifier-task-a")
+        prompt_file: Path to file containing the prompt
+        cwd: Working directory for the agent
+        verify_startup: Whether to verify the process started (default True)
+
+    Returns:
+        dict with success status and verification results
+    """
     # Create the session
     result = create_worker_session(session_name, cwd)
     if not result["success"]:
         return result
-    
+
     # Verify prompt file exists
     if not Path(prompt_file).exists():
         return {"success": False, "error": f"Prompt file not found: {prompt_file}"}
-    
+
     # Send command using file-based prompt (avoids escaping issues)
     cmd = f'claude --dangerously-skip-permissions --permission-mode bypassPermissions -p "$(cat {prompt_file})"'
     send_result = send_command(session_name, cmd)
-    
+
     if not send_result.get("success"):
         return {"success": False, "error": "Failed to send command to session"}
-    
+
     # Verify the process is actually running
     if verify_startup:
         verify_result = verify_process_running(session_name, wait_seconds=5)
@@ -373,7 +394,7 @@ def spawn_worker_with_prompt_file(
                 "error": verify_result.get("error", "Process failed to start"),
                 "output_sample": verify_result.get("output_sample", "")
             }
-    
+
     return {"success": True, "session": session_name}
 
 
@@ -481,6 +502,13 @@ def main():
     spawn_parser.add_argument("--prompt-file", required=True, help="Path to prompt file")
     spawn_parser.add_argument("--cwd", required=True, help="Working directory")
     spawn_parser.add_argument("--no-verify", action="store_true", help="Skip startup verification")
+
+    # spawn-agent command (generic - for verifier, integration-checker, reviewer, etc.)
+    agent_parser = subparsers.add_parser("spawn-agent", help="Spawn any agent type with prompt file")
+    agent_parser.add_argument("session_name", help="Tmux session name (e.g., verifier-task-a)")
+    agent_parser.add_argument("--prompt-file", required=True, help="Path to prompt file")
+    agent_parser.add_argument("--cwd", required=True, help="Working directory")
+    agent_parser.add_argument("--no-verify", action="store_true", help="Skip startup verification")
     
     # monitor command
     monitor_parser = subparsers.add_parser("monitor", help="Monitor task with timeout")
@@ -551,6 +579,21 @@ def main():
         )
         if result["success"]:
             print(f"✓ Spawned worker: {result['session']}")
+        else:
+            print(f"✗ Failed: {result['error']}")
+            if "output_sample" in result:
+                print(f"Output:\n{result['output_sample']}")
+            exit(1)
+
+    elif args.command == "spawn-agent":
+        result = spawn_agent(
+            args.session_name,
+            args.prompt_file,
+            args.cwd,
+            verify_startup=not args.no_verify
+        )
+        if result["success"]:
+            print(f"✓ Spawned agent: {result['session']}")
         else:
             print(f"✗ Failed: {result['error']}")
             if "output_sample" in result:
