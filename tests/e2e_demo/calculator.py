@@ -2,8 +2,10 @@
 
 This module implements the CalculatorProtocol contract (version: 804534f).
 """
+from typing import Union
 
-def add(a: int | float, b: int | float) -> int | float:
+
+def add(a: Union[int, float], b: Union[int, float]) -> Union[int, float]:
     """Add two numbers together.
 
     Args:
@@ -22,7 +24,7 @@ def add(a: int | float, b: int | float) -> int | float:
     return a + b
 
 
-def subtract(a: int | float, b: int | float) -> int | float:
+def subtract(a: Union[int, float], b: Union[int, float]) -> Union[int, float]:
     """Subtract b from a.
 
     Args:
