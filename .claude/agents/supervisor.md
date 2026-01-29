@@ -184,24 +184,21 @@ For each wave of tasks (tasks whose dependencies are satisfied):
 
 ### Spawning a Single Worker
 
+1. **Create the Session:**
 ```bash
-# 1. Create the tmux session
-python3 ~/.claude/orchestrator_code/tmux.py create-session worker-<task-id> --cwd .worktrees/<task-id>
+python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-<task-id>" --cwd "<absolute_path_to_worktree>"
+```
 
-# 2. Send the claude command to the session
-tmux send-keys -t worker-<task-id> 'claude --dangerously-skip-permissions --print "Execute task: <task-id>
+2. **Send the Agent Command:**
+```bash
+# Send the command to the specific session
+# We use raw tmux send-keys because tmux.py only handles session creation
+tmux send-keys -t "worker-<task-id>" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task <task-id>. Read .task-status.json context first. When done, touch .orchestrator/signals/<task-id>.done'" Enter
+```
 
-Working directory: <absolute path to project>/.worktrees/<task-id>
-
-## Task Specification
-<paste full task spec from tasks.yaml>
-
-## Instructions
-1. Implement the required changes
-2. Run verification commands
-3. Signal completion: touch .orchestrator/signals/<task-id>.done
-4. Update .task-status.json to completed
-"' Enter
+3. **Verify the session exists:**
+```bash
+tmux has-session -t "worker-<task-id>"
 ```
 
 ### Spawning Multiple Workers in Parallel
@@ -210,19 +207,25 @@ For Wave 1, create all tmux sessions first, then send commands:
 
 ```bash
 # Create all sessions
-python3 ~/.claude/orchestrator_code/tmux.py create-session worker-task-a --cwd .worktrees/task-a
-python3 ~/.claude/orchestrator_code/tmux.py create-session worker-task-b --cwd .worktrees/task-b
-python3 ~/.claude/orchestrator_code/tmux.py create-session worker-task-c --cwd .worktrees/task-c
+python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-task-a" --cwd ".worktrees/task-a"
+python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-task-b" --cwd ".worktrees/task-b"
+python3 ~/.claude/orchestrator_code/tmux.py create-session "worker-task-c" --cwd ".worktrees/task-c"
+
+# Verify sessions exist
+tmux has-session -t "worker-task-a"
+tmux has-session -t "worker-task-b"
+tmux has-session -t "worker-task-c"
 
 # Then send commands to each (they run in parallel)
-tmux send-keys -t worker-task-a 'claude --dangerously-skip-permissions --print "Execute task: task-a..."' Enter
-tmux send-keys -t worker-task-b 'claude --dangerously-skip-permissions --print "Execute task: task-b..."' Enter
-tmux send-keys -t worker-task-c 'claude --dangerously-skip-permissions --print "Execute task: task-c..."' Enter
+tmux send-keys -t "worker-task-a" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task task-a. Read .task-status.json context first. When done, touch .orchestrator/signals/task-a.done'" Enter
+tmux send-keys -t "worker-task-b" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task task-b. Read .task-status.json context first. When done, touch .orchestrator/signals/task-b.done'" Enter
+tmux send-keys -t "worker-task-c" "claude --dangerously-skip-permissions --permission-mode bypassPermissions -p 'Execute task task-c. Read .task-status.json context first. When done, touch .orchestrator/signals/task-c.done'" Enter
 ```
 
 **Key flags for headless execution:**
 - `--dangerously-skip-permissions` - Bypasses all permission prompts
-- `--print` - Non-interactive mode, prints output and exits
+- `--permission-mode bypassPermissions` - Full bypass mode
+- `-p` - Non-interactive prompt mode
 
 ### Monitoring Workers via Dashboard
 
