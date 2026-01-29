@@ -233,7 +233,7 @@ EOF
 
 # Launch claude CLI with worker agent in the tmux session
 # Include conda initialization for proper environment access
-tmux send-keys -t "worker-<task-id>" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute the task'" Enter
+tmux send-keys -t "worker-<task-id>" "source $CONDA_SH && conda activate $CONDA_ENV && claude --dangerously-skip-permissions --agent worker --print 'Read .task-prompt.md and execute the task'" Enter
 ```
 
 ### Spawning Multiple Workers in Parallel
@@ -252,9 +252,9 @@ sleep 0.3
 
 # Send commands to all workers
 # Note: Variables are expanded NOW, so they must be set before this runs
-tmux send-keys -t "worker-task-a" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
-tmux send-keys -t "worker-task-b" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
-tmux send-keys -t "worker-task-c" "source $CONDA_SH && conda activate $CONDA_ENV && claude --agent worker --print 'Read .task-prompt.md and execute'" Enter
+tmux send-keys -t "worker-task-a" "source $CONDA_SH && conda activate $CONDA_ENV && claude --dangerously-skip-permissions --agent worker --print 'Read .task-prompt.md and execute'" Enter
+tmux send-keys -t "worker-task-b" "source $CONDA_SH && conda activate $CONDA_ENV && claude --dangerously-skip-permissions --agent worker --print 'Read .task-prompt.md and execute'" Enter
+tmux send-keys -t "worker-task-c" "source $CONDA_SH && conda activate $CONDA_ENV && claude --dangerously-skip-permissions --agent worker --print 'Read .task-prompt.md and execute'" Enter
 ```
 
 ### Setup Worker Panes in Workers Window
