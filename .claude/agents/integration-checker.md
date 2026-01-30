@@ -239,15 +239,17 @@ You are running in a headless tmux session. When integration checks are complete
 
 ### Signal Files
 
-**Use the ABSOLUTE path provided in your prompt:**
+**Use the ABSOLUTE path provided in your prompt with tmux.py (NOT touch):**
 
 ```bash
 # If ALL required checks PASSED:
-touch /absolute/path/to/project/.orchestrator/signals/integration.passed
+python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/integration.passed
 
 # If ANY required check FAILED:
-touch /absolute/path/to/project/.orchestrator/signals/integration.failed
+python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/integration.failed
 ```
+
+**DO NOT USE `touch`** - it creates empty files which the signal detection ignores.
 
 ### What Happens After Your Signal
 

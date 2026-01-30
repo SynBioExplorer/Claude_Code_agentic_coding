@@ -216,14 +216,16 @@ If no test file found, fall back to `tests/` directory.
 
 You are running in a headless tmux session. When verification is complete:
 
-1. Create the signal file using the ABSOLUTE path provided in your prompt:
+1. Create the signal file using the tmux.py utility (NOT touch):
    ```bash
-   touch /absolute/path/to/project/.orchestrator/signals/<task-id>.verified
+   python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/<task-id>.verified
    ```
 2. The signal file tells the Supervisor that verification is complete
 
 **CRITICAL NOTES:**
+- **DO NOT USE `touch`** - it creates empty files which the signal detection ignores
+- Use `python3 ~/.claude/orchestrator_code/tmux.py create-signal <path>` instead
 - Look for "Signal file:" in your prompt for the exact path
 - Use absolute paths, not relative
-- Without the signal file, orchestration will hang
+- Without a valid signal file, orchestration will hang
 - Create signal file for BOTH pass and fail results

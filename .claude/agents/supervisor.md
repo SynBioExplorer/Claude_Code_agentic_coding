@@ -131,7 +131,7 @@ Working directory: <absolute-path-to-worktree>
 ## Instructions
 1. Implement the required changes in your worktree
 2. Run verification commands to ensure code works
-3. When done: touch <project-root>/.orchestrator/signals/<task-id>.done
+3. When done: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.done
 EOF
 
 # Spawn worker
@@ -159,7 +159,7 @@ Project root: <absolute-path>
 ## Instructions
 1. Run all verification commands from the task spec
 2. Check only files in files_write were modified
-3. When done: touch .orchestrator/signals/<task-id>.verified
+3. When done: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.verified
 4. Report PASS or FAIL
 EOF
 
@@ -201,8 +201,8 @@ Branch: staging (checkout staging before running tests)
 3. Run security scan if available
 4. Run type check if available
 5. Signal result (MUST do one of these):
-   - On SUCCESS: touch .orchestrator/signals/integration.passed
-   - On FAILURE: touch .orchestrator/signals/integration.failed
+   - On SUCCESS: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/integration.passed
+   - On FAILURE: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/integration.failed
 6. Report results
 EOF
 

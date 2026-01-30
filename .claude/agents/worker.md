@@ -127,8 +127,15 @@ Instead of directly editing `main.py`, record your intent:
 The Supervisor will apply these intents using the framework adapter.
 
 ### 5. Update Status
-Keep `.task-status.json` updated frequently (at least every major step):
+Keep `.task-status.json` updated frequently (at least every major step).
 
+**IMPORTANT: Use atomic writes to prevent JSON corruption:**
+```bash
+# Write to temp file first, then move atomically
+echo '{"task_id": "task-a", "status": "executing", ...}' > .task-status.json.tmp && mv .task-status.json.tmp .task-status.json
+```
+
+Example status:
 ```json
 {
   "task_id": "task-a",
@@ -291,20 +298,21 @@ You are running in a headless tmux session. The Supervisor monitors signal files
 
 1. First, ensure all your code changes are committed in the worktree
 2. Run verification commands to confirm everything works
-3. Create the signal file in the PROJECT ROOT (not your worktree):
+3. Create the signal file using the tmux.py utility (NOT touch - touch creates empty files which are ignored):
    ```bash
    # Signal file MUST be in project root, use absolute path
-   touch /absolute/path/to/project/.orchestrator/signals/<your-task-id>.done
+   python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/<your-task-id>.done
    ```
 4. Update `.task-status.json` to status "completed"
 
 **CRITICAL NOTES:**
+- **DO NOT USE `touch`** - it creates empty files which the signal detection ignores
+- Use `python3 ~/.claude/orchestrator_code/tmux.py create-signal <path>` instead
 - The signal file path will be provided in your prompt (look for "Signal file:" or similar)
 - Use the absolute path provided - don't guess at relative paths
-- Without the signal file, orchestration will hang waiting for you
-- The Supervisor polls for `.orchestrator/signals/<task-id>.done`
+- Without a valid signal file, orchestration will hang waiting for you
 
 **Example for task-users:**
 ```bash
-touch /private/tmp/my-project/.orchestrator/signals/task-users.done
+python3 ~/.claude/orchestrator_code/tmux.py create-signal /private/tmp/my-project/.orchestrator/signals/task-users.done
 ```
