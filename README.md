@@ -213,26 +213,28 @@ The supervisor:
 
 ### 3. Verification Phase (Two-Tier)
 
-The system uses a **two-tier verification** approach with sonnet for mechanical checks and opus for holistic review:
+The system uses a **two-tier verification** approach where each agent owns its merge decision:
 
-**Tier 1: Per-Task Verification (sonnet)**
+**Tier 1: Per-Task Verification (haiku)**
 1. Worker marks task `completed` in `.task-status.json`
 2. Supervisor spawns Verifier agent for THAT task
 3. Verifier checks: task tests, file boundaries, contract versions, environment hash
-4. If passed: Supervisor merges task to **staging** (not main!)
-5. Repeat for each completed task
+4. **If passed: Verifier merges task to staging** (atomic verify-then-merge)
+5. Verifier signals `.verified` (merged) or `.failed` (no merge)
 
 **Tier 2: Post-Merge Integration Check (sonnet)**
-After all tasks merged to staging:
+After all tasks have `.verified` signals (all merged to staging):
 1. Integration-Checker checks out staging branch
 2. Runs full test suite (not just task-specific)
 3. Security scanning (bandit, npm audit, etc.)
 4. Type checking across all modified files
-5. Signals result: `integration.passed` or `integration.failed`
+5. **If passed: Integration-Checker merges staging to main**
+6. Signals `integration.passed` (main updated) or `integration.failed` (main untouched)
 
-**Staging Branch Protection:**
-- If integration passes: staging is fast-forward merged to main
-- If integration fails: main remains clean and deployable
+**Why agents own merges:**
+- Atomic: No window between "verified" and "merged" where state could change
+- Clear ownership: Agent that validates makes the merge decision
+- Simpler Supervisor: Just spawns agents and waits for signals
 
 ### 4. Review Phase (opus)
 

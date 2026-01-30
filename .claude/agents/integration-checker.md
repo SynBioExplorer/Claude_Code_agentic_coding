@@ -233,35 +233,57 @@ Run:
 Report pass/fail for each check.
 ```
 
-## Termination Protocol (CRITICAL)
+## Merge Staging to Main (On Success)
 
-You are running in a headless tmux session. When integration checks are complete, you MUST signal the result.
-
-### Signal Files
-
-**Use the ABSOLUTE path provided in your prompt with tmux.py (NOT touch):**
+**If ALL required checks PASS**, you promote staging to main:
 
 ```bash
-# If ALL required checks PASSED:
-python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/integration.passed
+# 1. Ensure we're on staging (should already be)
+git checkout staging
 
-# If ANY required check FAILED:
+# 2. Checkout main
+git checkout main
+
+# 3. Fast-forward merge staging to main
+git merge staging --ff-only -m "Promote staging to main: integration passed"
+
+# 4. Clean up staging branch (optional, Supervisor may do this)
+# git branch -D staging
+```
+
+**If `--ff-only` fails:** This means main was modified outside orchestration. Do NOT force merge. Signal failure and report the issue.
+
+**If integration FAILS**, do NOT merge. Main remains clean.
+
+## Termination Protocol (CRITICAL)
+
+You are running in a headless tmux session. After checks (and merge if passed):
+
+### On SUCCESS (all checks passed, merged to main)
+
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/integration.passed
+```
+
+### On FAILURE (checks failed OR merge failed, main untouched)
+
+```bash
 python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/integration.failed
 ```
 
 **DO NOT USE `touch`** - it creates empty files which the signal detection ignores.
 
-### What Happens After Your Signal
+### What Your Signal Means
 
-| Signal File | Result |
-|-------------|--------|
-| `integration.passed` | Supervisor promotes staging → main |
-| `integration.failed` | Main remains untouched, orchestration stops |
+| Signal File | What Happened |
+|-------------|---------------|
+| `integration.passed` | All checks passed, staging merged to main |
+| `integration.failed` | Checks failed OR merge failed, main untouched |
 
 **CRITICAL NOTES:**
 - Look for "Signal file:" in your prompt for the exact path
 - Use absolute paths, not relative
 - You MUST create exactly ONE signal file (passed OR failed)
 - Without a signal file, orchestration will hang forever
-- Creating `.passed` when tests failed will break main - be accurate
+- `.passed` means main is now updated - be certain before signaling
 - The old `integration.done` signal is DEPRECATED - use `.passed` or `.failed`

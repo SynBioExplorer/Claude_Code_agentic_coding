@@ -66,23 +66,26 @@ Stage 2: Spawn Workers (parallel via tmux)
 Stage 3: Monitor & Verify (per completed task)
     Wait for .orchestrator/signals/<id>.done
     Spawn verifier: tmux.py spawn-agent verifier-<id> ...
+    │   └─ Verifier: validates → if PASS, merges to staging → .verified signal
     Wait for .orchestrator/signals/<id>.verified
     │
-Stage 4: Merge verified tasks to STAGING (not main!)
-    git checkout staging
-    git merge task/<id>
+Stage 4: Cleanup worktrees
+    git worktree remove .worktrees/<id>
+    git branch -d task/<id>
     │
-Stage 5: Integration Check on staging
+Stage 5: Integration Check (after ALL tasks verified)
     tmux.py spawn-agent integration-checker ...
+    │   └─ Integration-Checker: tests staging → if PASS, merges to main → .passed signal
     Wait for integration.passed OR integration.failed
     │
-Stage 6: Promote to main (only if integration passed)
-    git checkout main
-    git merge staging --ff-only
+Stage 6: Cleanup staging branch
+    git branch -D staging
     │
 Stage 7: Review
     tmux.py spawn-agent reviewer ...
 ```
+
+**Key change:** Verifier and Integration-Checker now own their merges. Supervisor is purely coordination.
 
 ## Stage 0: Setup
 
@@ -176,51 +179,62 @@ Project root: <absolute-path>
 ## Instructions
 1. Run all verification commands from the task spec
 2. Check only files in files_write were modified
-3. When done: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.verified
-4. Report PASS or FAIL
+3. If ALL checks PASS:
+   - Merge task branch to staging: git checkout staging && git merge task/<task-id>
+   - Signal: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.verified
+4. If ANY check FAILS:
+   - Do NOT merge
+   - Signal: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.failed
+5. Report PASS or FAIL with details
 EOF
 
 python3 ~/.claude/orchestrator_code/tmux.py spawn-agent verifier-<task-id> \
     --prompt-file .orchestrator/prompts/verifier-<task-id>.md \
     --cwd <project-root>
 
-# Wait for verification
-ls .orchestrator/signals/<task-id>.verified
+# Wait for verification (check for .verified OR .failed)
+# .verified = passed AND merged to staging
+# .failed = failed, no merge
 ```
 
-## Stage 4: Merge to Staging
+## Stage 4: Cleanup After Verification
 
-**IMPORTANT:** Merge to `staging`, NOT `main`. This protects main from broken integrations.
+**Verifier now handles the merge.** Supervisor just cleans up worktrees after verified signal:
 
 ```bash
-git checkout staging
-git merge task/<task-id> -m "Merge <task-id> to staging"
+# Wait for verified signal
+ls .orchestrator/signals/<task-id>.verified
+
+# Clean up worktree and task branch
 git worktree remove .worktrees/<task-id>
 git branch -d task/<task-id>
 ```
 
-Main remains untouched until integration passes.
+If `.failed` signal appears instead, do NOT clean up - keep worktree for debugging.
 
 ## Stage 5: Integration Check on Staging
 
-After ALL tasks merged to staging:
+After ALL tasks have `.verified` signals (meaning all merged to staging):
 
 ```bash
 cat > .orchestrator/prompts/integration-checker.md << 'EOF'
 You are the Integration Checker.
 
 Project root: <absolute-path>
-Branch: staging (checkout staging before running tests)
+Branch: staging (all tasks have been merged here)
 
 ## Instructions
 1. Checkout staging branch: git checkout staging
 2. Run full test suite: pytest tests/ -v (or equivalent)
 3. Run security scan if available
 4. Run type check if available
-5. Signal result (MUST do one of these):
-   - On SUCCESS: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/integration.passed
-   - On FAILURE: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/integration.failed
-6. Report results
+5. If ALL required checks PASS:
+   - Merge staging to main: git checkout main && git merge staging --ff-only
+   - Signal: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/integration.passed
+6. If ANY required check FAILS:
+   - Do NOT merge (main stays clean)
+   - Signal: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/integration.failed
+7. Report results
 EOF
 
 python3 ~/.claude/orchestrator_code/tmux.py spawn-agent integration-checker \
@@ -228,10 +242,11 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent integration-checker \
     --cwd <project-root>
 
 # Wait for integration result
-# Check for EITHER passed or failed signal
+# .passed = tests passed AND staging merged to main
+# .failed = tests failed, main untouched
 while true; do
     if [ -f .orchestrator/signals/integration.passed ]; then
-        echo "Integration PASSED"
+        echo "Integration PASSED - main updated"
         break
     fi
     if [ -f .orchestrator/signals/integration.failed ]; then
@@ -243,20 +258,17 @@ while true; do
 done
 ```
 
-## Stage 6: Promote Staging to Main
+## Stage 6: Cleanup (Post-Integration)
 
-**Only execute if integration passed.**
+**Integration-Checker handles the merge to main.** Supervisor just cleans up:
 
 ```bash
-# Fast-forward main to staging (no merge commit, clean history)
-git checkout main
-git merge staging --ff-only -m "Promote staging to main after integration pass"
-
-# Clean up staging branch
+# Integration-Checker already merged staging to main
+# Just clean up the staging branch
 git branch -D staging
 ```
 
-If `--ff-only` fails, it means main was modified outside orchestration. This is an error condition - do not force merge.
+If integration failed, keep staging for debugging/retry.
 
 ## Stage 7: Review
 

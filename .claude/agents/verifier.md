@@ -251,15 +251,40 @@ Test file mapping:
 
 If no test file found, fall back to `tests/` directory.
 
+## Merge to Staging (On Success)
+
+**If ALL verification checks PASS**, you merge the task branch to staging:
+
+```bash
+# 1. Go to the project root (not the worktree)
+cd <project-root>
+
+# 2. Checkout staging branch
+git checkout staging
+
+# 3. Merge the task branch
+git merge task/<task-id> -m "Merge <task-id>: verification passed"
+
+# 4. Return to project root (if needed)
+```
+
+**If verification FAILS**, do NOT merge. Just signal failure.
+
+This atomic verify-then-merge ensures no window exists between "verified" and "merged" where state could change.
+
 ## Termination Protocol (CRITICAL)
 
-You are running in a headless tmux session. When verification is complete:
+You are running in a headless tmux session. After verification (and merge if passed):
 
-1. Create the signal file using the tmux.py utility (NOT touch):
-   ```bash
-   python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/<task-id>.verified
-   ```
-2. The signal file tells the Supervisor that verification is complete
+**On SUCCESS (verification passed, merged to staging):**
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/<task-id>.verified
+```
+
+**On FAILURE (verification failed, no merge):**
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/<task-id>.failed
+```
 
 **CRITICAL NOTES:**
 - **DO NOT USE `touch`** - it creates empty files which the signal detection ignores
@@ -267,4 +292,5 @@ You are running in a headless tmux session. When verification is complete:
 - Look for "Signal file:" in your prompt for the exact path
 - Use absolute paths, not relative
 - Without a valid signal file, orchestration will hang
-- Create signal file for BOTH pass and fail results
+- `.verified` = passed AND merged to staging
+- `.failed` = failed, no merge attempted
