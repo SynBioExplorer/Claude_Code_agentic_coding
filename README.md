@@ -203,6 +203,7 @@ The planner-architect:
 ### 2. Execution Phase
 
 The supervisor:
+- Creates a **staging branch** from main (protects main from broken integrations)
 - Opens monitoring windows (Dashboard + Workers view)
 - Creates isolated git worktrees (`.worktrees/<task-id>/`)
 - Spawns worker agents in tmux sessions for true parallelism
@@ -216,19 +217,24 @@ The system uses a **two-tier verification** approach with sonnet for mechanical 
 1. Worker marks task `completed` in `.task-status.json`
 2. Supervisor spawns Verifier agent for THAT task
 3. Verifier checks: task tests, file boundaries, contract versions, environment hash
-4. If passed: Supervisor merges task to main
+4. If passed: Supervisor merges task to **staging** (not main!)
 5. Repeat for each completed task
 
 **Tier 2: Post-Merge Integration Check (sonnet)**
-After all tasks merged:
-1. Integration-Checker runs full test suite (not just task-specific)
-2. Security scanning (bandit, npm audit, etc.)
-3. Type checking across all modified files
-4. Report any cross-task integration issues
+After all tasks merged to staging:
+1. Integration-Checker checks out staging branch
+2. Runs full test suite (not just task-specific)
+3. Security scanning (bandit, npm audit, etc.)
+4. Type checking across all modified files
+5. Signals result: `integration.passed` or `integration.failed`
+
+**Staging Branch Protection:**
+- If integration passes: staging is fast-forward merged to main
+- If integration fails: main remains clean and deployable
 
 ### 4. Review Phase (opus)
 
-After integration checks pass:
+After integration passes and staging is promoted to main:
 - Planner-architect (opus) reviews the integrated result holistically
 - Evaluates: Does implementation fulfill the request? Is architecture coherent?
 - Accept or iterate (max 3 iterations)
@@ -313,10 +319,26 @@ Workers code against contracts. Max 2 renegotiations allowed.
 | New dependencies | +3 per package |
 | Incomplete test coverage | +20 × (1 - coverage) |
 
-**Thresholds:**
+**Thresholds (default):**
 - **0-25**: Auto-approve
 - **26-50**: Recommend review
 - **51+**: Require approval
+
+**Custom Configuration:**
+
+Sensitive patterns and thresholds can be customized via `.claude-agents.yaml`:
+
+```yaml
+risk:
+  sensitive_patterns:
+    - pattern: "auth|security|crypto"
+      weight: 20
+    - pattern: "internal/proprietary/*"
+      weight: 50
+  auto_approve_threshold: 30
+```
+
+Use with: `python3 ~/.claude/orchestrator_code/risk.py --config .claude-agents.yaml tasks.yaml`
 
 ## Files Created During Orchestration
 

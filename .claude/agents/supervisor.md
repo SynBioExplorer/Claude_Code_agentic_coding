@@ -55,6 +55,7 @@ python3 ~/.claude/orchestrator_code/tmux.py wait-signal .orchestrator/signals/<n
 Stage 0: Setup
     python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
     mkdir -p .orchestrator/{signals,logs,prompts}
+    git checkout -b staging main  # Create staging branch
     │
 Stage 1: Create Worktrees
     git worktree add -b task/<id> .worktrees/<id> main
@@ -67,13 +68,19 @@ Stage 3: Monitor & Verify (per completed task)
     Spawn verifier: tmux.py spawn-agent verifier-<id> ...
     Wait for .orchestrator/signals/<id>.verified
     │
-Stage 4: Merge verified tasks
+Stage 4: Merge verified tasks to STAGING (not main!)
+    git checkout staging
     git merge task/<id>
     │
-Stage 5: Integration Check
+Stage 5: Integration Check on staging
     tmux.py spawn-agent integration-checker ...
+    Wait for integration.passed OR integration.failed
     │
-Stage 6: Review
+Stage 6: Promote to main (only if integration passed)
+    git checkout main
+    git merge staging --ff-only
+    │
+Stage 7: Review
     tmux.py spawn-agent reviewer ...
 ```
 
@@ -92,6 +99,11 @@ mkdir -p .orchestrator/signals .orchestrator/logs .orchestrator/prompts
 
 # Compute environment hash (save this for verification)
 python3 ~/.claude/orchestrator_code/environment.py
+
+# Create staging branch from main (fresh start)
+git checkout main
+git branch -D staging 2>/dev/null || true  # Delete old staging if exists
+git checkout -b staging main
 ```
 
 ## Stage 1: Create Worktrees
@@ -159,39 +171,77 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent verifier-<task-id> \
 ls .orchestrator/signals/<task-id>.verified
 ```
 
-## Stage 4: Merge
+## Stage 4: Merge to Staging
+
+**IMPORTANT:** Merge to `staging`, NOT `main`. This protects main from broken integrations.
 
 ```bash
-git checkout main
-git merge task/<task-id> -m "Merge <task-id>"
+git checkout staging
+git merge task/<task-id> -m "Merge <task-id> to staging"
 git worktree remove .worktrees/<task-id>
 git branch -d task/<task-id>
 ```
 
-## Stage 5: Integration Check
+Main remains untouched until integration passes.
 
-After ALL tasks merged:
+## Stage 5: Integration Check on Staging
+
+After ALL tasks merged to staging:
 
 ```bash
 cat > .orchestrator/prompts/integration-checker.md << 'EOF'
 You are the Integration Checker.
 
 Project root: <absolute-path>
+Branch: staging (checkout staging before running tests)
 
 ## Instructions
-1. Run full test suite: pytest tests/ -v (or equivalent)
-2. Run security scan if available
-3. Run type check if available
-4. When done: touch .orchestrator/signals/integration.done
-5. Report results
+1. Checkout staging branch: git checkout staging
+2. Run full test suite: pytest tests/ -v (or equivalent)
+3. Run security scan if available
+4. Run type check if available
+5. Signal result (MUST do one of these):
+   - On SUCCESS: touch .orchestrator/signals/integration.passed
+   - On FAILURE: touch .orchestrator/signals/integration.failed
+6. Report results
 EOF
 
 python3 ~/.claude/orchestrator_code/tmux.py spawn-agent integration-checker \
     --prompt-file .orchestrator/prompts/integration-checker.md \
     --cwd <project-root>
+
+# Wait for integration result
+# Check for EITHER passed or failed signal
+while true; do
+    if [ -f .orchestrator/signals/integration.passed ]; then
+        echo "Integration PASSED"
+        break
+    fi
+    if [ -f .orchestrator/signals/integration.failed ]; then
+        echo "Integration FAILED - main remains clean"
+        # Do NOT proceed to Stage 6
+        exit 1
+    fi
+    sleep 5
+done
 ```
 
-## Stage 6: Review
+## Stage 6: Promote Staging to Main
+
+**Only execute if integration passed.**
+
+```bash
+# Fast-forward main to staging (no merge commit, clean history)
+git checkout main
+git merge staging --ff-only -m "Promote staging to main after integration pass"
+
+# Clean up staging branch
+git branch -D staging
+```
+
+If `--ff-only` fails, it means main was modified outside orchestration. This is an error condition - do not force merge.
+
+## Stage 7: Review
 
 ```bash
 cat > .orchestrator/prompts/reviewer.md << 'EOF'

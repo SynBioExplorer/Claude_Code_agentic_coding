@@ -39,7 +39,19 @@ You run post-merge verification to ensure all merged code works together. You pe
 
 ## When You're Called
 
-The Supervisor invokes you after all tasks have been merged to main, before the Planner-Architect holistic review. Your job is to catch integration issues that per-task verification might miss.
+The Supervisor invokes you after all tasks have been merged to the **staging branch** (not main), before the Planner-Architect holistic review. Your job is to catch integration issues that per-task verification might miss.
+
+**The staging branch protects main:** If integration fails, main remains clean and deployable. Only when you signal success will staging be promoted to main.
+
+## First Step: Checkout Staging
+
+**CRITICAL:** Before running any tests, ensure you're on the staging branch:
+
+```bash
+git checkout staging
+```
+
+All tasks have been merged to staging. Tests must run against this branch.
 
 ## Your Checks
 
@@ -223,16 +235,31 @@ Report pass/fail for each check.
 
 ## Termination Protocol (CRITICAL)
 
-You are running in a headless tmux session. When integration checks are complete:
+You are running in a headless tmux session. When integration checks are complete, you MUST signal the result.
 
-1. Create the signal file using the ABSOLUTE path provided in your prompt:
-   ```bash
-   touch /absolute/path/to/project/.orchestrator/signals/integration.done
-   ```
-2. The signal file tells the Supervisor that integration check is complete
+### Signal Files
+
+**Use the ABSOLUTE path provided in your prompt:**
+
+```bash
+# If ALL required checks PASSED:
+touch /absolute/path/to/project/.orchestrator/signals/integration.passed
+
+# If ANY required check FAILED:
+touch /absolute/path/to/project/.orchestrator/signals/integration.failed
+```
+
+### What Happens After Your Signal
+
+| Signal File | Result |
+|-------------|--------|
+| `integration.passed` | Supervisor promotes staging → main |
+| `integration.failed` | Main remains untouched, orchestration stops |
 
 **CRITICAL NOTES:**
 - Look for "Signal file:" in your prompt for the exact path
 - Use absolute paths, not relative
-- Without the signal file, orchestration will hang
-- Create signal file for BOTH pass and fail results
+- You MUST create exactly ONE signal file (passed OR failed)
+- Without a signal file, orchestration will hang forever
+- Creating `.passed` when tests failed will break main - be accurate
+- The old `integration.done` signal is DEPRECATED - use `.passed` or `.failed`

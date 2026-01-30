@@ -99,7 +99,7 @@
   <rect x="295" y="280" width="410" height="75" rx="12" fill="url(#supervisorGrad)" filter="url(#shadow)"/>
   <text x="500" y="307" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">SUPERVISOR</text>
   <text x="500" y="325" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">sonnet model</text>
-  <text x="500" y="343" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Create worktrees → Spawn tmux sessions → Monitor → Merge</text>
+  <text x="500" y="343" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Worktrees → tmux → Merge to staging → Promote to main</text>
 
   <!-- Arrows to Workers (fan out) -->
   <path d="M 390 355 L 390 380 L 280 380 L 280 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
@@ -152,9 +152,9 @@
 
   <!-- Integration Checker Box -->
   <rect x="530" y="605" width="240" height="60" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" filter="url(#shadow)"/>
-  <text x="650" y="628" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#92400e">INTEGRATION-CHECKER</text>
-  <text x="650" y="644" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • post-merge</text>
-  <text x="650" y="658" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#92400e">Full Tests • Security • Types</text>
+  <text x="650" y="625" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#92400e">INTEGRATION-CHECKER</text>
+  <text x="650" y="641" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • on staging branch</text>
+  <text x="650" y="655" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#92400e">Tests • Security • Pass → Promote to main</text>
 
   <!-- Arrow back to Planner for review -->
   <path d="M 770 635 L 900 635 L 900 190 L 710 190" stroke="#555" stroke-width="2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>
@@ -203,5 +203,6 @@
   <text x="900" y="683" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
 
   <!-- Footer -->
-  <text x="500" y="780" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Two-tier verification: Per-task (sonnet) → Integration check (sonnet) → Holistic review (opus)</text>
+  <text x="500" y="775" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Two-tier verification: Per-task (sonnet) → Merge to staging → Integration check → Promote to main → Review (opus)</text>
+  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Main branch protected: only updated after integration passes on staging</text>
 </svg>

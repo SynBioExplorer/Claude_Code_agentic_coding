@@ -5,6 +5,17 @@ Risk Score Calculator for orchestration plans.
 Usage:
     python3 ~/.claude/orchestrator_code/risk.py tasks.yaml
     python3 ~/.claude/orchestrator_code/risk.py --json tasks.yaml
+    python3 ~/.claude/orchestrator_code/risk.py --config .claude-agents.yaml tasks.yaml
+
+Sensitive patterns can be customized via .claude-agents.yaml:
+
+    risk:
+      sensitive_patterns:
+        - pattern: "auth|security|crypto"
+          weight: 20
+        - pattern: "internal/proprietary/*"
+          weight: 30
+      auto_approve_threshold: 25
 """
 
 import json
@@ -17,7 +28,8 @@ try:
 except ImportError:
     yaml = None
 
-SENSITIVE_PATTERNS = [
+# Default patterns used when no config is provided
+DEFAULT_SENSITIVE_PATTERNS = [
     (r"auth|security|crypto", 20),
     (r"payment|billing|stripe", 25),
     (r"prod|production|deploy", 30),
@@ -26,9 +38,12 @@ SENSITIVE_PATTERNS = [
     (r"migration|schema|database", 15),
 ]
 
+# Default threshold for auto-approval
+DEFAULT_AUTO_APPROVE_THRESHOLD = 25
 
-def load_plan(path: str) -> dict:
-    """Load plan from YAML or JSON file."""
+
+def load_yaml_or_json(path: str) -> dict:
+    """Load data from YAML or JSON file."""
     p = Path(path)
     content = p.read_text()
 
@@ -40,8 +55,87 @@ def load_plan(path: str) -> dict:
         return json.loads(content)
 
 
-def compute_risk_score(plan: dict) -> dict:
-    """Compute risk score for an execution plan."""
+def load_plan(path: str) -> dict:
+    """Load plan from YAML or JSON file."""
+    return load_yaml_or_json(path)
+
+
+def load_config(config_path: str | None) -> dict:
+    """Load risk configuration from .claude-agents.yaml or similar.
+
+    Returns dict with:
+        - sensitive_patterns: list of (pattern, weight) tuples
+        - auto_approve_threshold: int
+    """
+    config = {
+        "sensitive_patterns": DEFAULT_SENSITIVE_PATTERNS,
+        "auto_approve_threshold": DEFAULT_AUTO_APPROVE_THRESHOLD,
+    }
+
+    # Try to find config file
+    search_paths = []
+    if config_path:
+        search_paths.append(Path(config_path))
+    else:
+        # Default search locations
+        search_paths.extend([
+            Path.cwd() / ".claude-agents.yaml",
+            Path.cwd() / ".claude-agents.yml",
+        ])
+
+    config_file = None
+    for p in search_paths:
+        if p.exists():
+            config_file = p
+            break
+
+    if config_file is None:
+        return config
+
+    try:
+        data = load_yaml_or_json(str(config_file))
+        risk_config = data.get("risk", {})
+
+        # Load custom sensitive patterns
+        if "sensitive_patterns" in risk_config:
+            patterns = []
+            for item in risk_config["sensitive_patterns"]:
+                if isinstance(item, dict):
+                    pattern = item.get("pattern", "")
+                    weight = item.get("weight", 10)
+                    patterns.append((pattern, weight))
+                elif isinstance(item, str):
+                    # Simple string pattern with default weight
+                    patterns.append((item, 10))
+            if patterns:
+                config["sensitive_patterns"] = patterns
+
+        # Load auto-approve threshold
+        if "auto_approve_threshold" in risk_config:
+            config["auto_approve_threshold"] = int(risk_config["auto_approve_threshold"])
+
+    except Exception as e:
+        print(f"Warning: Failed to load config from {config_file}: {e}", file=sys.stderr)
+
+    return config
+
+
+def compute_risk_score(plan: dict, config: dict | None = None) -> dict:
+    """Compute risk score for an execution plan.
+
+    Args:
+        plan: The execution plan (tasks.yaml content)
+        config: Optional config dict from load_config(). If None, uses defaults.
+    """
+    if config is None:
+        config = {
+            "sensitive_patterns": DEFAULT_SENSITIVE_PATTERNS,
+            "auto_approve_threshold": DEFAULT_AUTO_APPROVE_THRESHOLD,
+        }
+
+    sensitive_patterns = config.get("sensitive_patterns", DEFAULT_SENSITIVE_PATTERNS)
+    auto_approve_threshold = config.get("auto_approve_threshold", DEFAULT_AUTO_APPROVE_THRESHOLD)
+
     score = 0
     factors = []
     tasks = plan.get("tasks", [])
@@ -49,7 +143,7 @@ def compute_risk_score(plan: dict) -> dict:
     # Factor 1: Sensitive paths
     for task in tasks:
         for path in task.get("files_write", []):
-            for pattern, weight in SENSITIVE_PATTERNS:
+            for pattern, weight in sensitive_patterns:
                 if re.search(pattern, path, re.IGNORECASE):
                     score += weight
                     factors.append(f"sensitive_path:{path}:{pattern.split('|')[0]}")
@@ -98,13 +192,14 @@ def compute_risk_score(plan: dict) -> dict:
         score += int((1.0 - coverage) * 20)
         factors.append(f"incomplete_test_coverage:{coverage:.0%}")
 
-    auto_approve = score <= 25
-    status = "AUTO-APPROVE" if auto_approve else ("REQUIRES REVIEW" if score <= 50 else "HIGH RISK")
+    auto_approve = score <= auto_approve_threshold
+    status = "AUTO-APPROVE" if auto_approve else ("REQUIRES REVIEW" if score <= auto_approve_threshold * 2 else "HIGH RISK")
 
     return {
         "score": score,
         "factors": factors,
         "auto_approve": auto_approve,
+        "auto_approve_threshold": auto_approve_threshold,
         "status": status
     }
 
@@ -114,15 +209,18 @@ def main():
     parser = argparse.ArgumentParser(description="Compute risk score for orchestration plan")
     parser.add_argument("plan_file", help="Path to tasks.yaml or tasks.json")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--config", help="Path to .claude-agents.yaml config file")
     args = parser.parse_args()
 
+    config = load_config(args.config)
     plan = load_plan(args.plan_file)
-    result = compute_risk_score(plan)
+    result = compute_risk_score(plan, config)
 
     if args.json:
         print(json.dumps(result, indent=2))
     else:
         print(f"\nRisk Score: {result['score']} ({result['status']})")
+        print(f"Auto-approve threshold: {result['auto_approve_threshold']}")
         print("Factors:")
         for f in result['factors']:
             print(f"  - {f}")
