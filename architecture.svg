@@ -98,8 +98,8 @@
   <!-- Supervisor Box -->
   <rect x="295" y="280" width="410" height="75" rx="12" fill="url(#supervisorGrad)" filter="url(#shadow)"/>
   <text x="500" y="307" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">SUPERVISOR</text>
-  <text x="500" y="325" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">sonnet model</text>
-  <text x="500" y="343" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Worktrees → tmux → Merge to staging → Promote to main</text>
+  <text x="500" y="325" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">sonnet model • coordination only</text>
+  <text x="500" y="343" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Worktrees → tmux spawn → Wait for signals → Cleanup</text>
 
   <!-- Arrows to Workers (fan out) -->
   <path d="M 390 355 L 390 380 L 280 380 L 280 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
@@ -144,8 +144,8 @@
   <!-- Verifier Box -->
   <rect x="230" y="605" width="240" height="60" rx="10" fill="url(#verifierGrad)" filter="url(#shadow)"/>
   <text x="350" y="628" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="white">VERIFIER</text>
-  <text x="350" y="644" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">sonnet • per-task</text>
-  <text x="350" y="658" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="rgba(255,255,255,0.8)">Tests • Boundaries • Contracts</text>
+  <text x="350" y="644" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">haiku • per-task • merges to staging</text>
+  <text x="350" y="658" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="rgba(255,255,255,0.8)">Tests • Boundaries • Failure Categorization</text>
 
   <!-- Staging Branch Indicator -->
   <rect x="475" y="620" width="50" height="30" rx="5" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
@@ -162,7 +162,7 @@
   <!-- Integration Checker Box -->
   <rect x="530" y="605" width="240" height="60" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" filter="url(#shadow)"/>
   <text x="650" y="625" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#92400e">INTEGRATION-CHECKER</text>
-  <text x="650" y="641" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • tests on staging</text>
+  <text x="650" y="641" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • merges staging to main</text>
   <text x="650" y="655" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#92400e">Full Suite • Security • Type Check</text>
 
   <!-- Promote to Main indicator -->
@@ -212,7 +212,7 @@
   <text x="855" y="604" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (workers)</text>
 
   <circle cx="840" cy="620" r="6" fill="url(#verifierGrad)"/>
-  <text x="855" y="624" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (verifier)</text>
+  <text x="855" y="624" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">haiku (verifier)</text>
 
   <rect x="834" y="634" width="12" height="12" rx="2" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
   <text x="855" y="644" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (integration)</text>
@@ -222,6 +222,6 @@
   <text x="900" y="683" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
 
   <!-- Footer -->
-  <text x="500" y="775" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Two-tier verification: Per-task (sonnet) → Merge to staging → Integration check → Promote to main → Review (opus)</text>
-  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Main branch protected: only updated after integration passes on staging</text>
+  <text x="500" y="775" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Verifier (haiku) merges to staging → Integration-Checker (sonnet) merges to main → Review (opus)</text>
+  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Agents own their merges. Supervisor coordinates only. Main protected until integration passes.</text>
 </svg>
