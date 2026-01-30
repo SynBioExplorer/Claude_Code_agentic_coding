@@ -455,22 +455,34 @@ tmux list-sessions -F '#{session_name}' | grep '^worker-' | xargs -I {} tmux kil
 rm -f /private/tmp/tmux-$(id -u)/default
 ```
 
-### tmux "server exited unexpectedly" (macOS with conda)
+### tmux "server exited unexpectedly" (macOS with conda only)
 
-If you see this error when attaching to tmux sessions, it's a known bug with conda's tmux package on macOS. The monitoring system works around this by using `capture-pane` instead of `attach`:
+This error **only affects conda's tmux package** on macOS. It's a bug in how conda builds/packages tmux, not tmux itself.
+
+**Solution:** Use the official tmux binary instead of conda's:
 
 ```bash
-# Don't use attach (crashes):
-# tmux attach -t worker-task-a  # ❌ crashes
+# Check which tmux you're using
+which tmux
+# If it shows /opt/miniconda3/bin/tmux or similar conda path, that's the problem
 
-# Use capture-pane instead (works):
+# Fix options (choose one):
+brew install tmux                    # Homebrew
+sudo port install tmux               # MacPorts
+# Or compile from source: https://github.com/tmux/tmux
+```
+
+After installing, ensure the non-conda tmux is first in your PATH, or use the full path.
+
+**Workaround (if you must use conda's tmux):**
+
+```bash
+# Use capture-pane instead of attach:
 tmux capture-pane -t worker-task-a -p  # ✓ works
 
 # Or use the workers view:
 python3 ~/.claude/orchestrator_code/workers_view.py  # ✓ works
 ```
-
-To fix permanently, install Homebrew's tmux: `brew install tmux`
 
 ## License
 
