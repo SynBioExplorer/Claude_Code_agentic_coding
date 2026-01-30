@@ -285,7 +285,7 @@ You are the Reviewer (Planner-Architect in review mode).
 ## Instructions
 1. Review the implementation holistically
 2. Check if original request is fulfilled
-3. When done: touch .orchestrator/signals/review.done
+3. When done: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/review.done
 4. Report ACCEPT or provide feedback
 EOF
 
