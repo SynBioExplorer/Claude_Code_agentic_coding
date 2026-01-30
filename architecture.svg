@@ -98,8 +98,8 @@
   <!-- Supervisor Box -->
   <rect x="295" y="280" width="410" height="75" rx="12" fill="url(#supervisorGrad)" filter="url(#shadow)"/>
   <text x="500" y="307" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="white">SUPERVISOR</text>
-  <text x="500" y="325" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">sonnet model • coordination only</text>
-  <text x="500" y="343" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Worktrees → tmux spawn → Wait for signals → Cleanup</text>
+  <text x="500" y="325" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="rgba(255,255,255,0.9)">sonnet model • coordination only • non-blocking</text>
+  <text x="500" y="343" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.8)">Pre-flight check → Worktrees → tmux → Monitor (blocked workers don't stall others)</text>
 
   <!-- Arrows to Workers (fan out) -->
   <path d="M 390 355 L 390 380 L 280 380 L 280 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
@@ -158,6 +158,10 @@
 
   <!-- "merge to" label -->
   <text x="445" y="615" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#3b82f6">merge to</text>
+
+  <!-- Incremental Check indicator (between staging and integration) -->
+  <rect x="478" y="655" width="44" height="16" rx="3" fill="#fef9c3" stroke="#eab308" stroke-width="1"/>
+  <text x="500" y="666" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="6" font-weight="600" fill="#854d0e">incr check</text>
 
   <!-- Integration Checker Box -->
   <rect x="530" y="605" width="240" height="60" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" filter="url(#shadow)"/>
@@ -222,6 +226,6 @@
   <text x="900" y="683" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
 
   <!-- Footer -->
-  <text x="500" y="775" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Verifier (haiku) merges to staging → Integration-Checker (sonnet) merges to main → Review (opus)</text>
-  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Agents own their merges. Supervisor coordinates only. Main protected until integration passes.</text>
+  <text x="500" y="775" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Verifier merges to staging → Incremental test → Final Integration-Checker → main → Review</text>
+  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Pre-flight env check • Incremental integration catches failures early • Non-blocking dependency handling</text>
 </svg>
