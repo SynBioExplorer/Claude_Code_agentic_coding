@@ -78,9 +78,9 @@ Add a REST API for user management with CRUD operations
 | Agent | Model | Role |
 |-------|-------|------|
 | `planner-architect` | opus | Analyzes codebase, decomposes into parallel tasks, generates contracts, reviews integration |
-| `supervisor` | sonnet | Creates git worktrees, spawns workers in tmux, monitors progress, handles merges |
+| `supervisor` | sonnet | Creates git worktrees, spawns workers in tmux, monitors progress, handles merges, mediates dependency requests |
 | `worker` | sonnet | Executes single task in isolated worktree, respects file boundaries |
-| `verifier` | sonnet | Per-task mechanical checks: tests, boundaries, contracts, environment hash |
+| `verifier` | haiku | Per-task mechanical checks with failure categorization (logic error vs env issue vs timeout) |
 | `integration-checker` | sonnet | Post-merge checks: full test suite, security scanning, type checking |
 
 ## Orchestrator Utilities
@@ -98,6 +98,7 @@ Standalone Python scripts in `~/.claude/orchestrator_code/`:
 | `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py init/status/resume` |
 | `tasks.py` | Check task readiness, blocked tasks | `python3 ~/.claude/orchestrator_code/tasks.py blocked` |
 | `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
+| `context.py` | Shared context store, prompt injection | `python3 ~/.claude/orchestrator_code/context.py get-for-task task-a` |
 | `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
 | `workers_view.py` | Live worker output panels | `python3 ~/.claude/orchestrator_code/workers_view.py` |
 | `monitoring.py` | Open/manage monitoring windows | `python3 ~/.claude/orchestrator_code/monitoring.py open` |
@@ -307,6 +308,43 @@ class AuthServiceProtocol(Protocol):
 ```
 
 Workers code against contracts. Max 2 renegotiations allowed.
+
+### Context Injection (Push-Based)
+
+The Supervisor injects relevant project context directly into worker prompts, rather than workers pulling context at runtime:
+
+```bash
+# Supervisor looks up context and injects into prompt
+CONTEXT=$(python3 ~/.claude/orchestrator_code/context.py get-for-task task-auth --tasks-file tasks.yaml)
+```
+
+Tasks can specify explicit context keys:
+```yaml
+tasks:
+  - id: task-auth-service
+    context_keys: ["auth-rules", "jwt-config"]  # Injected into worker prompt
+```
+
+This is better than pull-based because:
+- Workers don't waste tokens searching for context
+- Supervisor has global view of what's relevant
+- No risk of workers missing important context
+
+### Dependency Resolution (RFC Model)
+
+When workers discover missing dependencies, the Supervisor mediates:
+
+```
+Worker → "I need pandas>=2.0" → Supervisor checks conflicts → User approves → Install → Restart worker
+```
+
+1. **Worker signals blocked**: Writes `{"status": "blocked", "needs_dependency": "pandas>=2.0"}` to `.task-status.json`
+2. **Supervisor detects**: `python3 ~/.claude/orchestrator_code/tasks.py blocked`
+3. **Conflict check**: Supervisor checks for version conflicts with other workers
+4. **User approval**: Supervisor asks user before installing (security boundary)
+5. **Install & restart**: Supervisor installs, recomputes env hash, restarts worker
+
+The Supervisor is the only entity that can modify lockfiles. Workers request, Supervisor decides.
 
 ### Risk Scoring
 

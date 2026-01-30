@@ -26,6 +26,9 @@ Usage:
 
     # Delete a context entry
     python3 context.py delete "old_decision"
+
+    # Get context for a task (for prompt injection)
+    python3 context.py get-for-task "task-auth-service" --tasks-file tasks.yaml
 """
 
 import json
@@ -334,6 +337,129 @@ def format_entries(entries: dict) -> str:
     return "\n".join(lines)
 
 
+def get_context_for_task(
+    task_id: str,
+    tasks_file: str = "tasks.yaml",
+    project_dir: Optional[str] = None
+) -> str:
+    """Get relevant context for a task to inject into worker prompts.
+
+    This implements push-based context injection: the Supervisor looks up
+    relevant context and injects it into the worker prompt, rather than
+    the worker pulling context at runtime.
+
+    Lookup strategy:
+    1. Explicit context_keys from task specification (highest priority)
+    2. Search by task description keywords
+    3. Search by files_write/files_read paths
+
+    Args:
+        task_id: The task ID to get context for
+        tasks_file: Path to tasks.yaml
+        project_dir: Optional project directory
+
+    Returns:
+        Formatted context string for prompt injection
+    """
+    import yaml
+    from pathlib import Path
+
+    base = Path(project_dir) if project_dir else Path.cwd()
+    tasks_path = base / tasks_file
+
+    # Load task specification
+    if not tasks_path.exists():
+        return ""
+
+    try:
+        with open(tasks_path) as f:
+            tasks_data = yaml.safe_load(f)
+    except Exception:
+        # Fall back to JSON if YAML fails
+        try:
+            with open(tasks_path) as f:
+                tasks_data = json.load(f)
+        except Exception:
+            return ""
+
+    # Find the task
+    task = None
+    for t in tasks_data.get("tasks", []):
+        if t.get("id") == task_id:
+            task = t
+            break
+
+    if not task:
+        return ""
+
+    # Load context store
+    context = load_context(project_dir)
+    entries = context.get("entries", {})
+
+    if not entries:
+        return ""
+
+    relevant_context = {}
+
+    # 1. Explicit context_keys (highest priority)
+    context_keys = task.get("context_keys", [])
+    for key in context_keys:
+        if key in entries:
+            relevant_context[key] = entries[key]
+
+    # 2. Search by task description keywords
+    description = task.get("description", "")
+    if description:
+        # Extract significant words (>3 chars, not common words)
+        common_words = {"the", "and", "for", "with", "that", "this", "from", "will", "should", "must"}
+        words = re.findall(r'\b\w{4,}\b', description.lower())
+        keywords = [w for w in words if w not in common_words]
+
+        for keyword in keywords[:5]:  # Limit to top 5 keywords
+            for key, entry in entries.items():
+                if key in relevant_context:
+                    continue
+                # Match keyword in key or value
+                if keyword in key.lower():
+                    relevant_context[key] = entry
+                elif isinstance(entry.get("value"), str) and keyword in entry["value"].lower():
+                    relevant_context[key] = entry
+
+    # 3. Search by file paths
+    files = task.get("files_write", []) + task.get("files_read", [])
+    for file_path in files:
+        # Extract directory and file components
+        parts = Path(file_path).parts
+        for part in parts:
+            if part in ("src", "tests", "lib", "app"):
+                continue
+            for key, entry in entries.items():
+                if key in relevant_context:
+                    continue
+                if part.lower() in key.lower():
+                    relevant_context[key] = entry
+
+    # Format for injection
+    if not relevant_context:
+        return ""
+
+    lines = ["## Relevant Project Context", ""]
+    for key, entry in relevant_context.items():
+        value = entry.get("value", "")
+        if isinstance(value, dict) or isinstance(value, list):
+            value_str = json.dumps(value, indent=2)
+            lines.append(f"### {key}")
+            lines.append("```")
+            lines.append(value_str)
+            lines.append("```")
+        else:
+            lines.append(f"### {key}")
+            lines.append(str(value))
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -390,6 +516,21 @@ def main():
             sys.exit(1)
         key = sys.argv[2]
         delete_entry(key)
+
+    elif command == "get-for-task":
+        if len(sys.argv) < 3:
+            print("Usage: context.py get-for-task <task-id> [--tasks-file <path>]")
+            sys.exit(1)
+        task_id = sys.argv[2]
+        tasks_file = "tasks.yaml"
+        if "--tasks-file" in sys.argv:
+            idx = sys.argv.index("--tasks-file") + 1
+            if idx < len(sys.argv):
+                tasks_file = sys.argv[idx]
+        result = get_context_for_task(task_id, tasks_file)
+        if result:
+            print(result)
+        # No error if empty - just means no relevant context found
 
     elif command == "--json":
         # Output full context as JSON

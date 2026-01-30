@@ -119,11 +119,16 @@ git worktree add -b task/<task-id> .worktrees/<task-id> main
 For each task in the current wave:
 
 ```bash
-# Write worker prompt
-cat > .orchestrator/prompts/worker-<task-id>.md << 'EOF'
+# 1. Get relevant context for this task (CONTEXT INJECTION)
+CONTEXT=$(python3 ~/.claude/orchestrator_code/context.py get-for-task <task-id> --tasks-file tasks.yaml)
+
+# 2. Write worker prompt with injected context
+cat > .orchestrator/prompts/worker-<task-id>.md << EOF
 You are a Worker agent executing task <task-id>.
 
 Working directory: <absolute-path-to-worktree>
+
+$CONTEXT
 
 ## Task Specification
 <copy from tasks.yaml>
@@ -134,10 +139,22 @@ Working directory: <absolute-path-to-worktree>
 3. When done: python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.done
 EOF
 
-# Spawn worker
+# 3. Spawn worker
 python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-<task-id> \
     --prompt-file .orchestrator/prompts/worker-<task-id>.md \
     --cwd .worktrees/<task-id>
+```
+
+**Context Injection**: The `get-for-task` command looks up relevant context from the project's `.context/` store and injects it directly into the worker prompt. This is better than workers pulling context at runtime because:
+- Workers don't need to remember to search
+- No wasted tokens on context lookups
+- Supervisor has global view of what's relevant
+
+Tasks can also specify explicit context keys in tasks.yaml:
+```yaml
+tasks:
+  - id: task-auth-service
+    context_keys: ["auth-rules", "jwt-config"]  # Explicitly inject these
 ```
 
 ## Stage 3: Monitor and Verify
@@ -300,7 +317,12 @@ tmux kill-session -t <session-name>
 - **Merge conflict**: Should not happen with proper file ownership - escalate
 - **Task blocked (missing dependency)**: See below
 
-## Handling Blocked Tasks
+## Handling Blocked Tasks (RFC Dependency Model)
+
+Workers can request dependencies by writing to `.task-status.json`:
+```json
+{"status": "blocked", "blocked_reason": "Missing required dependency", "needs_dependency": "pandas>=2.0"}
+```
 
 The `monitor` command automatically detects blocked tasks:
 
@@ -314,33 +336,82 @@ python3 ~/.claude/orchestrator_code/tmux.py monitor <task-id> --signal-file .orc
 # 2 = blocked (needs dependency)
 ```
 
-You can also check explicitly:
+### Dependency Resolution Workflow (RFC Model)
 
-```bash
-# Check if a specific task is blocked
-python3 ~/.claude/orchestrator_code/tmux.py check-blocked <task-id>
+When a worker requests a dependency, the Supervisor acts as mediator:
 
-# List all blocked tasks
-python3 ~/.claude/orchestrator_code/tasks.py blocked
+```
+Worker → "I need pandas>=2.0" → Supervisor checks → User approves → Install → Restart worker
 ```
 
-If tasks are blocked:
+**Step 1: Detect blocked tasks**
+```bash
+# Check all blocked tasks
+python3 ~/.claude/orchestrator_code/tasks.py blocked --json
+```
 
-1. **Report clearly to user**:
-   ```
-   Task task-data-analysis is BLOCKED
-   Reason: Missing required dependency
-   Needs: pandas>=2.0
+**Step 2: Check for conflicts**
+```bash
+# Get all requested dependencies across workers
+# Check against existing lockfile for version conflicts
+pip index versions pandas  # or uv pip compile --dry-run
+```
 
-   To resolve: pip install pandas>=2.0
-   Then restart orchestration.
-   ```
+**Step 3: Present to user for approval**
+```
+DEPENDENCY REQUEST
+==================
+Task: task-data-analysis
+Requested: pandas>=2.0
 
-2. **Do NOT continue** - blocked tasks cannot complete without intervention
+Conflict check: No conflicts detected
+Current lockfile: pandas not present
 
-3. **Clean up gracefully**:
-   - Save logs from all running sessions
-   - Kill remaining worker sessions
-   - Report full list of missing dependencies
+Install pandas>=2.0? [Y/n]
+```
 
-The user must install dependencies and restart. This is intentional - allowing mid-flight dependency installation would break environment consistency.
+**Step 4: If approved, install and restart**
+```bash
+# Install (Supervisor is the only entity that can modify lockfiles)
+uv add pandas>=2.0  # or pip install pandas>=2.0
+
+# Recompute environment hash
+NEW_HASH=$(python3 ~/.claude/orchestrator_code/environment.py)
+
+# Kill and restart the blocked worker with new hash
+tmux kill-session -t worker-<task-id>
+
+# Re-spawn with updated environment
+python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-<task-id> \
+    --prompt-file .orchestrator/prompts/worker-<task-id>.md \
+    --cwd .worktrees/<task-id>
+```
+
+### Why Supervisor Mediates (Not Workers)
+
+1. **Global view**: Supervisor sees all workers' requirements, can detect conflicts
+2. **Lockfile ownership**: Only Supervisor can modify lockfiles (security boundary)
+3. **Environment consistency**: Recompute hash after install, restart affected workers
+4. **User approval**: Human in the loop for security (no auto-install of arbitrary packages)
+
+### Conflict Scenarios
+
+| Scenario | Action |
+|----------|--------|
+| No conflict | Ask user, install if approved |
+| Version conflict | Report conflict, ask user to resolve manually |
+| Security concern (unknown package) | Flag for review, require explicit approval |
+
+### Auto-Approve Mode (Optional)
+
+For trusted environments, configure auto-approval in `.claude-agents.yaml`:
+```yaml
+dependencies:
+  auto_approve: true  # Skip user prompt (use with caution)
+  allowed_packages:   # Whitelist for auto-approve
+    - pandas
+    - numpy
+    - requests
+```
+
+Without auto-approve, the Supervisor MUST pause and ask the user before installing any dependency.
