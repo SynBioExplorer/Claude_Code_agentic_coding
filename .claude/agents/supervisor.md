@@ -90,6 +90,10 @@ Stage 7: Review
 ## Stage 0: Setup
 
 ```bash
+# === CLEANUP TRAP (run on exit/interrupt) ===
+# Ensures repo isn't left in locked state if Supervisor is killed
+trap 'echo "Cleaning up..."; git worktree prune 2>/dev/null; tmux kill-server 2>/dev/null || true' EXIT SIGINT SIGTERM
+
 # Validate DAG
 python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
 
@@ -100,8 +104,20 @@ python3 ~/.claude/orchestrator_code/tmux.py cleanup-signals
 # Create directories
 mkdir -p .orchestrator/signals .orchestrator/logs .orchestrator/prompts
 
+# === DRY-RUN ENVIRONMENT CHECK ===
+# Verify dependencies can be resolved before spending time on workers
+if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+    echo "Pre-flight: checking Python dependencies..."
+    uv sync --dry-run 2>&1 || pip check 2>&1 || echo "Warning: dependency check skipped"
+fi
+if [ -f "package.json" ]; then
+    echo "Pre-flight: checking Node dependencies..."
+    npm install --dry-run 2>&1 || echo "Warning: npm check skipped"
+fi
+
 # Compute environment hash (save this for verification)
-python3 ~/.claude/orchestrator_code/environment.py
+ENV_HASH=$(python3 ~/.claude/orchestrator_code/environment.py)
+echo "Environment hash: $ENV_HASH"
 
 # Create staging branch from main (fresh start)
 git checkout main
@@ -197,24 +213,43 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent verifier-<task-id> \
 # .failed = failed, no merge
 ```
 
-## Stage 4: Cleanup After Verification
+## Stage 4: Incremental Integration Check
 
-**Verifier now handles the merge.** Supervisor just cleans up worktrees after verified signal:
+**After EACH task is merged to staging, run a quick integration check.**
+
+This catches integration failures immediately, not after all tasks are merged.
 
 ```bash
 # Wait for verified signal
 ls .orchestrator/signals/<task-id>.verified
+
+# === INCREMENTAL INTEGRATION CHECK ===
+# Run full test suite on staging to catch integration issues early
+git checkout staging
+echo "Running incremental integration check after merging <task-id>..."
+
+# Run tests (fail fast - if this breaks, we know which task caused it)
+if ! pytest tests/ -x --tb=short 2>&1; then
+    echo "INCREMENTAL INTEGRATION FAILED after merging <task-id>"
+    echo "This task broke the build. Investigate before continuing."
+    # Create failure signal
+    python3 ~/.claude/orchestrator_code/tmux.py create-signal .orchestrator/signals/incremental-<task-id>.failed
+    # Do NOT clean up - keep worktree for debugging
+    exit 1
+fi
+
+echo "Incremental check passed for <task-id>"
 
 # Clean up worktree and task branch
 git worktree remove .worktrees/<task-id>
 git branch -d task/<task-id>
 ```
 
-If `.failed` signal appears instead, do NOT clean up - keep worktree for debugging.
+If incremental check fails, you immediately know which task broke the build.
 
-## Stage 5: Integration Check on Staging
+## Stage 5: Final Integration Check on Staging
 
-After ALL tasks have `.verified` signals (meaning all merged to staging):
+After ALL tasks have `.verified` signals AND incremental checks passed:
 
 ```bash
 cat > .orchestrator/prompts/integration-checker.md << 'EOF'
@@ -318,8 +353,10 @@ tmux kill-session -t <session-name>
 1. **NO Task tool** - You don't have access to it. Use tmux.py spawn-agent for everything.
 2. **Respect DAG** - Only spawn workers when dependencies are merged
 3. **Verify before merge** - Every task must pass verification
-4. **Signal files** - All agents signal completion via touch commands
+4. **Signal files** - Use `tmux.py create-signal` (NOT touch) for all signals
 5. **Clean up** - Remove worktrees after merge
+6. **Non-blocking monitoring** - If one worker is blocked, continue monitoring others
+7. **Incremental integration** - Run tests after each merge to staging, not just at end
 
 ## Error Handling
 
@@ -329,74 +366,107 @@ tmux kill-session -t <session-name>
 - **Merge conflict**: Should not happen with proper file ownership - escalate
 - **Task blocked (missing dependency)**: See below
 
-## Handling Blocked Tasks (RFC Dependency Model)
+## Handling Blocked Tasks (Non-Blocking RFC Model)
 
 Workers can request dependencies by writing to `.task-status.json`:
 ```json
 {"status": "blocked", "blocked_reason": "Missing required dependency", "needs_dependency": "pandas>=2.0"}
 ```
 
-The `monitor` command automatically detects blocked tasks:
+**CRITICAL: Non-Blocking Monitoring**
+
+When one worker is blocked, **continue monitoring healthy workers**. Don't stall everything.
 
 ```bash
-# Monitor returns exit code 2 if task is blocked
-python3 ~/.claude/orchestrator_code/tmux.py monitor <task-id> --signal-file .orchestrator/signals/<task-id>.done
+# Monitor loop - check ALL workers, don't block on one
+while true; do
+    BLOCKED_TASKS=""
+    COMPLETED_TASKS=""
+    RUNNING_TASKS=""
 
-# Exit codes:
-# 0 = completed successfully
-# 1 = failed/timeout
-# 2 = blocked (needs dependency)
+    for task_id in <all-task-ids>; do
+        result=$(python3 ~/.claude/orchestrator_code/tmux.py monitor $task_id \
+            --signal-file .orchestrator/signals/$task_id.done \
+            --timeout 5)  # Short timeout, non-blocking check
+
+        exit_code=$?
+        case $exit_code in
+            0) COMPLETED_TASKS="$COMPLETED_TASKS $task_id" ;;
+            2) BLOCKED_TASKS="$BLOCKED_TASKS $task_id" ;;
+            *) RUNNING_TASKS="$RUNNING_TASKS $task_id" ;;
+        esac
+    done
+
+    # Process completed tasks (spawn verifiers)
+    for task_id in $COMPLETED_TASKS; do
+        # Spawn verifier for this task...
+    done
+
+    # If all non-blocked tasks are done, THEN handle blocked tasks
+    if [ -z "$RUNNING_TASKS" ] && [ -n "$BLOCKED_TASKS" ]; then
+        echo "All runnable tasks complete. Handling blocked tasks..."
+        break
+    fi
+
+    # If everything is done, exit
+    if [ -z "$RUNNING_TASKS" ] && [ -z "$BLOCKED_TASKS" ]; then
+        echo "All tasks completed."
+        break
+    fi
+
+    sleep 10
+done
 ```
 
-### Dependency Resolution Workflow (RFC Model)
+### Dependency Resolution (After Healthy Workers Complete)
 
-When a worker requests a dependency, the Supervisor acts as mediator:
+Only pause for user approval when no healthy workers are running:
 
-```
-Worker → "I need pandas>=2.0" → Supervisor checks → User approves → Install → Restart worker
-```
-
-**Step 1: Detect blocked tasks**
+**Step 1: Collect all blocked tasks**
 ```bash
-# Check all blocked tasks
 python3 ~/.claude/orchestrator_code/tasks.py blocked --json
 ```
 
-**Step 2: Check for conflicts**
+**Step 2: Check for conflicts across ALL blocked tasks**
 ```bash
-# Get all requested dependencies across workers
-# Check against existing lockfile for version conflicts
-pip index versions pandas  # or uv pip compile --dry-run
+# Collect all requested dependencies
+# Check for version conflicts between them
 ```
 
-**Step 3: Present to user for approval**
+**Step 3: Present batch to user**
 ```
-DEPENDENCY REQUEST
-==================
+DEPENDENCY REQUESTS (3 tasks blocked)
+=====================================
 Task: task-data-analysis
-Requested: pandas>=2.0
+  Needs: pandas>=2.0
+  Conflict: None
 
-Conflict check: No conflicts detected
-Current lockfile: pandas not present
+Task: task-ml-model
+  Needs: scikit-learn>=1.0
+  Conflict: None
 
-Install pandas>=2.0? [Y/n]
+Task: task-viz
+  Needs: matplotlib>=3.5
+  Conflict: None
+
+Install all? [Y/n/select]
 ```
 
-**Step 4: If approved, install and restart**
+**Step 4: Batch install and restart**
 ```bash
-# Install (Supervisor is the only entity that can modify lockfiles)
-uv add pandas>=2.0  # or pip install pandas>=2.0
+# Install all approved dependencies at once
+uv add pandas>=2.0 scikit-learn>=1.0 matplotlib>=3.5
 
-# Recompute environment hash
+# Recompute environment hash ONCE
 NEW_HASH=$(python3 ~/.claude/orchestrator_code/environment.py)
 
-# Kill and restart the blocked worker with new hash
-tmux kill-session -t worker-<task-id>
-
-# Re-spawn with updated environment
-python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-<task-id> \
-    --prompt-file .orchestrator/prompts/worker-<task-id>.md \
-    --cwd .worktrees/<task-id>
+# Restart ALL blocked workers
+for task_id in $BLOCKED_TASKS; do
+    tmux kill-session -t worker-$task_id 2>/dev/null
+    python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-$task_id \
+        --prompt-file .orchestrator/prompts/worker-$task_id.md \
+        --cwd .worktrees/$task_id
+done
 ```
 
 ### Why Supervisor Mediates (Not Workers)

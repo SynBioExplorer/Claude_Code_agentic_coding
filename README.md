@@ -205,10 +205,13 @@ The planner-architect:
 ### 2. Execution Phase
 
 The supervisor:
+- **Pre-flight checks**: Dry-run dependency resolution (`uv sync --dry-run`, `npm install --dry-run`)
+- **Cleanup trap**: Registers signal handlers to clean up worktrees on exit/interrupt
 - Creates a **staging branch** from main (protects main from broken integrations)
 - Opens monitoring windows (Dashboard + Workers view)
 - Creates isolated git worktrees (`.worktrees/<task-id>/`)
 - Spawns worker agents in tmux sessions for true parallelism
+- **Non-blocking monitoring**: If one worker is blocked (needs dependency), continues monitoring healthy workers
 - Monitors progress via `.task-status.json` files
 
 ### 3. Verification Phase (Two-Tier)
@@ -221,9 +224,12 @@ The system uses a **two-tier verification** approach where each agent owns its m
 3. Verifier checks: task tests, file boundaries, contract versions, environment hash
 4. **If passed: Verifier merges task to staging** (atomic verify-then-merge)
 5. Verifier signals `.verified` (merged) or `.failed` (no merge)
+6. **Incremental integration check**: Supervisor runs full test suite on staging immediately
+   - If tests fail, we know exactly which task broke the build
+   - No need to wait for all tasks to find integration issues
 
-**Tier 2: Post-Merge Integration Check (sonnet)**
-After all tasks have `.verified` signals (all merged to staging):
+**Tier 2: Final Integration Check (sonnet)**
+After all tasks have `.verified` signals AND incremental checks passed:
 1. Integration-Checker checks out staging branch
 2. Runs full test suite (not just task-specific)
 3. Security scanning (bandit, npm audit, etc.)
