@@ -89,40 +89,154 @@ def load_context(project_dir: Optional[str] = None) -> dict:
 
 
 def save_context(context: dict, project_dir: Optional[str] = None) -> None:
-    """Save the context to disk with file locking to prevent race conditions."""
-    import fcntl
-    
+    """Save the context to disk atomically.
+
+    Uses temp file + fsync + rename for atomic writes.
+    """
+    import tempfile
+    import os
+
     context_path = get_context_path(project_dir)
     context["updated_at"] = datetime.now().isoformat()
 
-    with open(context_path, 'w') as f:
-        fcntl.flock(f, fcntl.LOCK_EX)  # Exclusive lock
-        try:
-            json.dump(context, f, indent=2)
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)  # Always unlock
+    # Atomic write: temp file + fsync + rename
+    dir_path = context_path.parent
+    fd = None
+    temp_path = None
+
+    try:
+        fd, temp_path = tempfile.mkstemp(
+            suffix='.tmp',
+            prefix='context_',
+            dir=str(dir_path)
+        )
+        content = json.dumps(context, indent=2)
+        os.write(fd, content.encode('utf-8'))
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        os.rename(temp_path, context_path)
+        temp_path = None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+
+
+def load_and_lock_context(project_dir: Optional[str] = None) -> tuple[dict, Any]:
+    """Load context with exclusive lock held for read-modify-write operations.
+
+    IMPORTANT: The returned lock file handle MUST be closed by calling
+    release_context_lock() after modifications are saved.
+
+    This prevents lost updates where:
+    - Agent A: load → modify
+    - Agent B: load → modify → save (overwrites)
+    - Agent A: save (A's changes lost, B's changes lost)
+
+    Returns:
+        tuple of (context_dict, lock_file_handle)
+    """
+    import fcntl
+
+    context_path = get_context_path(project_dir)
+    lock_path = context_path.with_suffix('.lock')
+
+    # Ensure lock file exists
+    lock_path.touch()
+
+    # Open and acquire exclusive lock
+    lock_file = open(lock_path, 'r+')
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+    # Now load the context while holding the lock
+    if context_path.exists():
+        with open(context_path, 'r') as f:
+            context = json.load(f)
+    else:
+        context = init_context(project_dir)
+
+    return context, lock_file
+
+
+def save_and_release_context(
+    context: dict,
+    lock_file: Any,
+    project_dir: Optional[str] = None
+) -> None:
+    """Save context and release the lock.
+
+    Must be called after load_and_lock_context() to complete the
+    read-modify-write cycle.
+
+    Args:
+        context: Modified context dict to save
+        lock_file: Lock file handle from load_and_lock_context()
+        project_dir: Optional project directory
+    """
+    import fcntl
+
+    try:
+        # Save the context atomically
+        save_context(context, project_dir)
+    finally:
+        # Always release the lock
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+
+
+def release_context_lock(lock_file: Any) -> None:
+    """Release a context lock without saving (e.g., on error).
+
+    Args:
+        lock_file: Lock file handle from load_and_lock_context()
+    """
+    import fcntl
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+    except Exception:
+        pass
 
 
 def add_entry(key: str, value: Any, agent: str = "unknown", project_dir: Optional[str] = None) -> None:
-    """Add or update a context entry."""
-    context = load_context(project_dir)
+    """Add or update a context entry with proper locking.
 
-    # Try to parse value as JSON if it's a string
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            pass  # Keep as string
+    Uses load_and_lock_context to prevent lost updates from concurrent modifications.
+    """
+    # Load with lock to prevent lost updates
+    context, lock_file = load_and_lock_context(project_dir)
 
-    context["entries"][key] = {
-        "value": value,
-        "added_by": agent,
-        "added_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat()
-    }
+    try:
+        # Try to parse value as JSON if it's a string
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                pass  # Keep as string
 
-    save_context(context, project_dir)
-    print(f"Added context: {key}")
+        context["entries"][key] = {
+            "value": value,
+            "added_by": agent,
+            "added_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+
+        # Save and release lock
+        save_and_release_context(context, lock_file, project_dir)
+        print(f"Added context: {key}")
+
+    except Exception as e:
+        # Release lock on error
+        release_context_lock(lock_file)
+        raise e
 
 
 def get_entry(key: str, project_dir: Optional[str] = None) -> Optional[Any]:
@@ -177,17 +291,27 @@ def search_entries(query: str, project_dir: Optional[str] = None) -> dict:
 
 
 def delete_entry(key: str, project_dir: Optional[str] = None) -> bool:
-    """Delete a context entry."""
-    context = load_context(project_dir)
+    """Delete a context entry with proper locking.
 
-    if key in context["entries"]:
-        del context["entries"][key]
-        save_context(context, project_dir)
-        print(f"Deleted context: {key}")
-        return True
+    Uses load_and_lock_context to prevent lost updates from concurrent modifications.
+    """
+    context, lock_file = load_and_lock_context(project_dir)
 
-    print(f"Context not found: {key}")
-    return False
+    try:
+        if key in context["entries"]:
+            del context["entries"][key]
+            save_and_release_context(context, lock_file, project_dir)
+            print(f"Deleted context: {key}")
+            return True
+
+        # Key not found, just release lock
+        release_context_lock(lock_file)
+        print(f"Context not found: {key}")
+        return False
+
+    except Exception as e:
+        release_context_lock(lock_file)
+        raise e
 
 
 def format_entries(entries: dict) -> str:

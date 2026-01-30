@@ -117,11 +117,51 @@ def validate_boundaries(task_id: str, tasks_file: str = "tasks.yaml") -> dict:
     }
 
 
-def run_verification_commands(task_id: str, tasks_file: str = "tasks.yaml") -> dict:
-    """Run all verification commands for a task."""
+def validate_task_verification(task: dict) -> tuple[bool, str]:
+    """Validate that a task has proper verification commands.
+
+    Per ARCHITECTURE spec, verification commands are a HARD REQUIREMENT.
+    Tasks with empty verification arrays are invalid.
+
+    Args:
+        task: Task specification dict
+
+    Returns:
+        tuple of (is_valid, error_message)
+    """
+    verification = task.get("verification", [])
+
+    if not verification:
+        return False, "Task has no verification commands (HARD REQUIREMENT)"
+
+    # Check each verification command has required fields
+    for i, v in enumerate(verification):
+        if not v.get("command"):
+            return False, f"Verification {i} has no command"
+
+    return True, ""
+
+
+def run_verification_commands(
+    task_id: str,
+    tasks_file: str = "tasks.yaml",
+    fail_fast: bool = True
+) -> dict:
+    """Run all verification commands for a task.
+
+    Args:
+        task_id: Task identifier
+        tasks_file: Path to tasks YAML file
+        fail_fast: If True, stop on first required command failure (default True)
+    """
     task = get_task_spec(tasks_file, task_id)
     if task is None:
         return {"success": False, "error": f"Task {task_id} not found"}
+
+    # Validate verification commands exist (HARD REQUIREMENT)
+    valid, error = validate_task_verification(task)
+    if not valid:
+        return {"success": False, "error": error, "validation_failed": True}
 
     worktree_path = f".worktrees/{task_id}"
     if not Path(worktree_path).exists():
@@ -139,7 +179,11 @@ def run_verification_commands(task_id: str, tasks_file: str = "tasks.yaml") -> d
         modified_files = get_modified_files(worktree_path)
         command = command.replace("{modified_files}", " ".join(modified_files))
 
-        # Run command
+        # Run command with configurable timeout (default 5 minutes, allow up to 10)
+        timeout_seconds = verification.get("timeout", 300)
+        if timeout_seconds > 600:
+            timeout_seconds = 600  # Cap at 10 minutes
+
         try:
             result = subprocess.run(
                 command,
@@ -147,12 +191,15 @@ def run_verification_commands(task_id: str, tasks_file: str = "tasks.yaml") -> d
                 cwd=worktree_path,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=timeout_seconds
             )
             passed = result.returncode == 0
         except subprocess.TimeoutExpired:
             passed = False
-            result = type('obj', (object,), {'stdout': '', 'stderr': 'Timeout after 5 minutes'})()
+            result = type('obj', (object,), {
+                'stdout': '',
+                'stderr': f'Timeout after {timeout_seconds} seconds'
+            })()
 
         if required and not passed:
             all_passed = False
@@ -165,6 +212,17 @@ def run_verification_commands(task_id: str, tasks_file: str = "tasks.yaml") -> d
             "stdout": result.stdout[:1000] if passed else "",
             "stderr": result.stderr[:1000] if not passed else ""
         })
+
+        # Fail-fast: stop on first required command failure
+        if fail_fast and required and not passed:
+            return {
+                "success": False,
+                "results": results,
+                "passed": sum(1 for r in results if r["passed"]),
+                "failed": sum(1 for r in results if not r["passed"]),
+                "stopped_early": True,
+                "failed_at": command
+            }
 
     return {
         "success": all_passed,

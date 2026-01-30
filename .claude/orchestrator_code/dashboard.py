@@ -64,28 +64,48 @@ def get_last_activity(task_id: str) -> str:
     return ""
 
 
-def load_orchestration_state() -> dict:
-    """Load main orchestration state."""
-    state_file = Path(".orchestration-state.json")
-    if state_file.exists():
+def safe_read_json(filepath: Path, max_retries: int = 3) -> dict:
+    """Safely read JSON file with retry on parse failure.
+
+    If file is being written, may get partial content. Retry with backoff.
+
+    Args:
+        filepath: Path to JSON file
+        max_retries: Number of retries on parse failure
+
+    Returns:
+        Parsed dict or empty dict if file doesn't exist or can't be parsed
+    """
+    if not filepath.exists():
+        return {}
+
+    for attempt in range(max_retries):
         try:
-            return json.loads(state_file.read_text())
+            content = filepath.read_text()
+            return json.loads(content)
         except json.JSONDecodeError:
-            # File might be partially written, return empty
+            if attempt < max_retries - 1:
+                time.sleep(0.1 * (attempt + 1))  # Backoff: 0.1s, 0.2s, 0.3s
+                continue
+            # Last attempt failed, return empty
             return {}
     return {}
+
+
+def load_orchestration_state() -> dict:
+    """Load main orchestration state.
+
+    Uses safe_read_json with retries to handle partial writes gracefully.
+    """
+    return safe_read_json(Path(".orchestration-state.json"))
 
 
 def load_task_status(task_id: str) -> dict:
-    """Load individual task status from worktree."""
-    status_file = Path(f".worktrees/{task_id}/.task-status.json")
-    if status_file.exists():
-        try:
-            return json.loads(status_file.read_text())
-        except json.JSONDecodeError:
-            # File might be partially written, return empty
-            return {}
-    return {}
+    """Load individual task status from worktree.
+
+    Uses safe_read_json with retries to handle partial writes gracefully.
+    """
+    return safe_read_json(Path(f".worktrees/{task_id}/.task-status.json"))
 
 
 def get_elapsed_time(state: dict) -> str:

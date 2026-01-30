@@ -14,6 +14,9 @@ Usage:
 import json
 import uuid
 import sys
+import os
+import fcntl
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +27,93 @@ except ImportError:
 
 
 STATE_FILE = ".orchestration-state.json"
+
+
+def atomic_write_json(filepath: Path, data: dict) -> bool:
+    """Write JSON atomically using temp file + fsync + rename pattern.
+
+    This prevents corruption from partial writes and ensures data is
+    flushed to disk before the rename.
+
+    Args:
+        filepath: Path to the target file
+        data: Dictionary to write as JSON
+
+    Returns:
+        True if write succeeded
+    """
+    # Create temp file in same directory to ensure same filesystem (for atomic rename)
+    dir_path = filepath.parent
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    fd = None
+    temp_path = None
+    try:
+        # Create temp file
+        fd, temp_path = tempfile.mkstemp(
+            suffix='.tmp',
+            prefix=filepath.stem + '_',
+            dir=str(dir_path)
+        )
+
+        # Write data
+        content = json.dumps(data, indent=2)
+        os.write(fd, content.encode('utf-8'))
+
+        # Fsync to ensure data is on disk
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+
+        # Atomic rename
+        os.rename(temp_path, filepath)
+        temp_path = None
+
+        return True
+
+    except Exception as e:
+        # Clean up on failure
+        if fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+        raise e
+
+
+def safe_read_json(filepath: Path, max_retries: int = 3) -> dict | None:
+    """Safely read JSON file with retry on parse failure.
+
+    If file is being written, may get partial content. Retry with backoff.
+
+    Args:
+        filepath: Path to JSON file
+        max_retries: Number of retries on parse failure
+
+    Returns:
+        Parsed dict or None if file doesn't exist
+    """
+    import time
+
+    if not filepath.exists():
+        return None
+
+    for attempt in range(max_retries):
+        try:
+            content = filepath.read_text()
+            return json.loads(content)
+        except json.JSONDecodeError:
+            if attempt < max_retries - 1:
+                time.sleep(0.1 * (attempt + 1))  # Backoff: 0.1s, 0.2s, 0.3s
+                continue
+            # Last attempt failed, return None instead of crashing
+            return None
+    return None
 
 
 def load_plan(path: str) -> dict:
@@ -77,7 +167,8 @@ def init_state(request: str, tasks_file: str = "tasks.yaml", open_monitoring: bo
         "iteration": 1
     }
 
-    Path(STATE_FILE).write_text(json.dumps(state, indent=2))
+    # Use atomic write to prevent corruption
+    atomic_write_json(Path(STATE_FILE), state)
 
     # Auto-open monitoring windows
     if open_monitoring:
@@ -91,16 +182,19 @@ def init_state(request: str, tasks_file: str = "tasks.yaml", open_monitoring: bo
 
 
 def load_state() -> dict | None:
-    """Load existing state or return None."""
-    p = Path(STATE_FILE)
-    if p.exists():
-        return json.loads(p.read_text())
-    return None
+    """Load existing state or return None.
+
+    Uses safe_read_json to handle partial writes gracefully.
+    """
+    return safe_read_json(Path(STATE_FILE))
 
 
 def save_state(state: dict):
-    """Save state to file."""
-    Path(STATE_FILE).write_text(json.dumps(state, indent=2))
+    """Save state to file atomically.
+
+    Uses atomic_write_json to prevent corruption from partial writes.
+    """
+    atomic_write_json(Path(STATE_FILE), state)
 
 
 def update_task(task_id: str, new_status: str, error: str = None) -> dict:
@@ -126,14 +220,12 @@ def get_effective_status(task_id: str, task_info: dict) -> str:
 
     The worktree status file has the most up-to-date status from the worker.
     Falls back to the state file status if no worktree status exists.
+    Uses safe_read_json to handle partial writes gracefully.
     """
     status_file = Path(f".worktrees/{task_id}/.task-status.json")
-    if status_file.exists():
-        try:
-            task_status = json.loads(status_file.read_text())
-            return task_status.get("status", "unknown")
-        except (json.JSONDecodeError, IOError):
-            pass
+    task_status = safe_read_json(status_file)
+    if task_status:
+        return task_status.get("status", "unknown")
     return task_info.get("status", "pending")
 
 

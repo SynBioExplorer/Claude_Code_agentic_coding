@@ -19,57 +19,120 @@ import os
 import subprocess
 import time
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 
-def wait_for_signal_file(signal_file: str, timeout: int = 600) -> bool:
-    """Wait for a signal file to appear.
-    
+# Constants for atomic operations
+SIGNAL_SUFFIX_TMP = ".tmp"
+HEARTBEAT_INTERVAL = 30  # seconds
+HEARTBEAT_STALE_THRESHOLD = 90  # seconds - consider worker hung if no heartbeat for this long
+
+
+def create_signal_file(signal_file: str, content: str = "") -> bool:
+    """Create a signal file atomically using write-tmp-then-rename pattern.
+
+    This prevents TOCTOU races where a file appears to exist but is incomplete
+    or where cleanup removes it during creation.
+
+    Args:
+        signal_file: Path to the signal file to create
+        content: Optional content to write (default empty)
+
+    Returns:
+        True if created successfully, False otherwise
+    """
+    signal_path = Path(signal_file)
+    tmp_path = signal_path.with_suffix(signal_path.suffix + SIGNAL_SUFFIX_TMP)
+
+    try:
+        # Ensure parent directory exists
+        signal_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write to temp file first
+        tmp_path.write_text(content or datetime.now().isoformat())
+
+        # Atomic rename (on POSIX systems, rename is atomic within same filesystem)
+        tmp_path.rename(signal_path)
+        return True
+    except Exception as e:
+        # Clean up temp file if it exists
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+        return False
+
+
+def wait_for_signal_file(signal_file: str, timeout: int = 600, poll_interval: float = 0.5) -> bool:
+    """Wait for a signal file to appear with atomic read verification.
+
+    Uses faster polling (0.5s instead of 1s) and verifies file is fully written
+    by checking it's not a .tmp file and has content.
+
     Args:
         signal_file: Path to the signal file to wait for
         timeout: Maximum seconds to wait (default: 600 = 10 minutes)
-        
+        poll_interval: Seconds between checks (default: 0.5)
+
     Returns:
-        True if signal file appeared, False if timeout
+        True if signal file appeared and is valid, False if timeout
     """
     start_time = time.time()
-    while not os.path.exists(signal_file):
+    signal_path = Path(signal_file)
+
+    while True:
         if time.time() - start_time > timeout:
             return False
-        time.sleep(1)
-    return True
+
+        # Check if signal file exists (not the .tmp version)
+        if signal_path.exists() and not signal_path.with_suffix(signal_path.suffix + SIGNAL_SUFFIX_TMP).exists():
+            # Verify the file has content (fully written)
+            try:
+                content = signal_path.read_text()
+                if content:  # Non-empty = valid signal
+                    return True
+            except Exception:
+                pass  # File might be in transition, keep waiting
+
+        time.sleep(poll_interval)
 
 
-def create_worker_session(session_name: str, cwd: str = None) -> dict:
+def create_worker_session(
+    session_name: str,
+    cwd: str = None,
+    verify_claude: bool = True,
+    init_timeout: float = 5.0
+) -> dict:
     """Create a tmux session for a worker with proper shell initialization.
-    
+
     This ensures conda and claude commands are available on macOS by
-    sourcing shell profile files.
-    
+    sourcing shell profile files. Includes verification that claude is available.
+
     Args:
         session_name: Name for the tmux session
         cwd: Working directory for the session (optional)
-        
+        verify_claude: Whether to verify 'claude' command is available (default True)
+        init_timeout: Seconds to wait for shell initialization (default 5.0)
+
     Returns:
         dict with success status and any error message
     """
     try:
-        # Kill existing session if it exists (handles orphaned sessions)
-        subprocess.run(
-            ["tmux", "kill-session", "-t", session_name],
-            capture_output=True, check=False
-        )
-        
-        # Create new detached session
-        create_cmd = ["tmux", "new-session", "-d", "-s", session_name]
+        # Generate unique session suffix to avoid race with duplicate names
+        unique_session = f"{session_name}-{uuid.uuid4().hex[:6]}"
+
+        # Create new detached session with unique name first
+        create_cmd = ["tmux", "new-session", "-d", "-s", unique_session]
         if cwd:
             create_cmd.extend(["-c", cwd])
-        
+
         result = subprocess.run(create_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             return {"success": False, "error": f"Failed to create session: {result.stderr}"}
-        
+
         # Source shell profile to ensure conda/claude are available
         # This is critical for macOS where PATH isn't set in non-interactive shells
         # NOTE: Many .zshrc files have `[[ $- != *i* ]] && return` which exits early
@@ -83,16 +146,67 @@ def create_worker_session(session_name: str, cwd: str = None) -> dict:
             "true"
         )
         subprocess.run(
-            ["tmux", "send-keys", "-t", session_name, init_cmd, "Enter"],
+            ["tmux", "send-keys", "-t", unique_session, init_cmd, "Enter"],
             capture_output=True, check=False
         )
-        
-        # Small delay to let shell initialization complete
-        time.sleep(0.5)
-        
+
+        # Wait for shell initialization (increased from 0.5s to configurable, default 5s)
+        # This is critical for conda activation which can take 1-3 seconds on cold start
+        time.sleep(init_timeout)
+
+        # Verify claude command is available if requested
+        if verify_claude:
+            # Use 'which claude' to verify command is in PATH
+            verify_cmd = "which claude > /dev/null 2>&1 && echo 'CLAUDE_OK' || echo 'CLAUDE_NOT_FOUND'"
+            subprocess.run(
+                ["tmux", "send-keys", "-t", unique_session, verify_cmd, "Enter"],
+                capture_output=True, check=False
+            )
+            time.sleep(0.5)
+
+            # Capture pane output to check result
+            capture_result = subprocess.run(
+                ["tmux", "capture-pane", "-t", unique_session, "-p", "-S", "-5"],
+                capture_output=True, text=True, timeout=5
+            )
+            output = capture_result.stdout if capture_result.returncode == 0 else ""
+
+            if "CLAUDE_NOT_FOUND" in output:
+                # Clean up the session we created
+                subprocess.run(
+                    ["tmux", "kill-session", "-t", unique_session],
+                    capture_output=True, check=False
+                )
+                return {
+                    "success": False,
+                    "error": "claude command not found in PATH after shell initialization. "
+                             "Ensure claude is installed and PATH is correctly set in shell profile."
+                }
+
+        # Now that we've verified the session works, kill any old session with the target name
+        # and rename our session to the target name
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True, check=False
+        )
+
+        # Rename our uniquely-named session to the requested name
+        subprocess.run(
+            ["tmux", "rename-session", "-t", unique_session, session_name],
+            capture_output=True, check=False
+        )
+
         return {"success": True, "session": session_name}
-        
+
     except Exception as e:
+        # Try to clean up on error
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", unique_session],
+                capture_output=True, check=False
+            )
+        except Exception:
+            pass
         return {"success": False, "error": str(e)}
 
 
@@ -125,24 +239,73 @@ def check_session_exists(session_name: str) -> bool:
     return result.returncode == 0
 
 
-def verify_process_running(session_name: str, wait_seconds: int = 5) -> dict:
+def verify_process_running(
+    session_name: str,
+    wait_seconds: int = 10,
+    early_exit_on_failure: bool = True
+) -> dict:
     """Verify that a process is actually running in the tmux session.
-    
+
     Captures pane output and checks for signs of activity or failure.
-    
+    Increased default wait from 5s to 10s to handle larger model initialization.
+
     Args:
         session_name: Target tmux session
-        wait_seconds: Seconds to wait before checking (let process start)
-        
+        wait_seconds: Seconds to wait before checking (default 10, increased from 5)
+        early_exit_on_failure: If True, check for failures during wait period
+
     Returns:
         dict with running status, output sample, and any detected errors
     """
-    time.sleep(wait_seconds)
-    
+    # Early failure detection during wait period
+    if early_exit_on_failure:
+        check_interval = 1.0
+        elapsed = 0.0
+
+        while elapsed < wait_seconds:
+            if not check_session_exists(session_name):
+                return {"running": False, "error": "Session does not exist"}
+
+            # Quick check for early failures
+            try:
+                result = subprocess.run(
+                    ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-20"],
+                    capture_output=True, text=True, timeout=5
+                )
+                output = result.stdout if result.returncode == 0 else ""
+
+                # Check for critical failures that warrant early exit
+                critical_failures = [
+                    "command not found",
+                    "No such file or directory",
+                    "Permission denied",
+                    "CLAUDE_NOT_FOUND",
+                    "ModuleNotFoundError",
+                    "segmentation fault",
+                    "killed",
+                    "OOM",
+                ]
+
+                for failure in critical_failures:
+                    if failure.lower() in output.lower():
+                        return {
+                            "running": False,
+                            "error": f"Early failure detected: {failure}",
+                            "output_sample": output[-500:] if len(output) > 500 else output,
+                            "elapsed_before_failure": elapsed
+                        }
+            except Exception:
+                pass
+
+            time.sleep(check_interval)
+            elapsed += check_interval
+    else:
+        time.sleep(wait_seconds)
+
     if not check_session_exists(session_name):
         return {"running": False, "error": "Session does not exist"}
-    
-    # Capture recent output
+
+    # Capture recent output for final check
     try:
         result = subprocess.run(
             ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-50"],
@@ -151,7 +314,7 @@ def verify_process_running(session_name: str, wait_seconds: int = 5) -> dict:
         output = result.stdout if result.returncode == 0 else ""
     except Exception as e:
         return {"running": False, "error": f"Failed to capture pane: {e}"}
-    
+
     # Check for common failure indicators
     failure_indicators = [
         "command not found",
@@ -165,37 +328,37 @@ def verify_process_running(session_name: str, wait_seconds: int = 5) -> dict:
         "ModuleNotFoundError",
         "ImportError",
     ]
-    
+
     detected_errors = []
     for indicator in failure_indicators:
         if indicator.lower() in output.lower():
             detected_errors.append(indicator)
-    
+
     # Check if shell prompt is back (process exited quickly)
     # Common prompts: $, %, >, or username@hostname patterns
     lines = output.strip().split('\n')
     last_lines = lines[-3:] if len(lines) >= 3 else lines
-    
+
     prompt_patterns = ["$ ", "% ", "> ", "❯ "]
     shell_returned = any(
-        any(p in line for p in prompt_patterns) 
+        any(p in line for p in prompt_patterns)
         for line in last_lines
     )
-    
+
     if detected_errors:
         return {
             "running": False,
             "error": f"Detected errors: {', '.join(detected_errors)}",
             "output_sample": output[-500:] if len(output) > 500 else output
         }
-    
+
     if shell_returned and "claude" not in output.lower():
         return {
             "running": False,
             "error": "Process appears to have exited (shell prompt returned)",
             "output_sample": output[-500:] if len(output) > 500 else output
         }
-    
+
     return {
         "running": True,
         "output_sample": output[-500:] if len(output) > 500 else output
@@ -276,25 +439,64 @@ def ensure_signals_dir() -> Path:
     return signals_dir
 
 
-def cleanup_signals() -> dict:
-    """Remove all old signal files to ensure clean slate.
-    
+def cleanup_signals(orchestration_id: str = None, max_age_hours: float = 2.0) -> dict:
+    """Remove old signal files while protecting current orchestration's signals.
+
+    Only removes signals that are:
+    1. Not from the current orchestration (if orchestration_id provided)
+    2. Older than max_age_hours (default 2 hours)
+
+    This prevents the race condition where cleanup removes a signal file
+    that a worker just created.
+
+    Args:
+        orchestration_id: Current orchestration ID to protect (optional)
+        max_age_hours: Only remove files older than this (default 2.0)
+
     Returns:
-        dict with count of removed files
+        dict with count of removed files and protected files
     """
     signals_dir = Path(".orchestrator/signals")
     if not signals_dir.exists():
-        return {"removed": 0}
-    
+        return {"removed": 0, "protected": 0}
+
     removed = 0
-    for f in signals_dir.glob("*.done"):
-        f.unlink()
-        removed += 1
-    for f in signals_dir.glob("*.verified"):
-        f.unlink()
-        removed += 1
-    
-    return {"removed": removed}
+    protected = 0
+    cutoff_time = time.time() - (max_age_hours * 3600)
+
+    for pattern in ["*.done", "*.verified", "*.heartbeat"]:
+        for f in signals_dir.glob(pattern):
+            try:
+                # Check file age
+                file_mtime = f.stat().st_mtime
+                if file_mtime > cutoff_time:
+                    # File is recent, check if it belongs to current orchestration
+                    if orchestration_id:
+                        content = f.read_text()
+                        if orchestration_id in content:
+                            protected += 1
+                            continue
+                    else:
+                        # No orchestration_id provided, protect all recent files
+                        protected += 1
+                        continue
+
+                # Old file or not from current orchestration - safe to remove
+                f.unlink()
+                removed += 1
+            except Exception:
+                pass  # File might have been removed by another process
+
+    # Also clean up any orphaned .tmp files
+    for f in signals_dir.glob("*.tmp"):
+        try:
+            if f.stat().st_mtime < cutoff_time:
+                f.unlink()
+                removed += 1
+        except Exception:
+            pass
+
+    return {"removed": removed, "protected": protected}
 
 
 def cleanup_orphaned_sessions(save_logs: bool = True) -> dict:
@@ -385,9 +587,9 @@ def spawn_agent(
     if not send_result.get("success"):
         return {"success": False, "error": "Failed to send command to session"}
 
-    # Verify the process is actually running
+    # Verify the process is actually running (use new default of 10s with early exit)
     if verify_startup:
-        verify_result = verify_process_running(session_name, wait_seconds=5)
+        verify_result = verify_process_running(session_name, wait_seconds=10, early_exit_on_failure=True)
         if not verify_result["running"]:
             return {
                 "success": False,
@@ -398,55 +600,134 @@ def spawn_agent(
     return {"success": True, "session": session_name}
 
 
+def check_heartbeat(task_id: str, stale_threshold: float = HEARTBEAT_STALE_THRESHOLD) -> dict:
+    """Check if a worker's heartbeat is fresh.
+
+    Workers should write to .orchestrator/signals/<task-id>.heartbeat every 30 seconds.
+
+    Args:
+        task_id: Task identifier
+        stale_threshold: Seconds after which heartbeat is considered stale (default 90)
+
+    Returns:
+        dict with heartbeat status
+    """
+    heartbeat_file = Path(f".orchestrator/signals/{task_id}.heartbeat")
+
+    if not heartbeat_file.exists():
+        return {"has_heartbeat": False, "stale": True, "reason": "No heartbeat file"}
+
+    try:
+        mtime = heartbeat_file.stat().st_mtime
+        age = time.time() - mtime
+        is_stale = age > stale_threshold
+
+        return {
+            "has_heartbeat": True,
+            "stale": is_stale,
+            "age_seconds": int(age),
+            "last_update": datetime.fromtimestamp(mtime).isoformat()
+        }
+    except Exception as e:
+        return {"has_heartbeat": False, "stale": True, "reason": str(e)}
+
+
+def update_heartbeat(task_id: str) -> bool:
+    """Update the heartbeat file for a task.
+
+    Called by workers periodically to indicate they're still alive.
+
+    Args:
+        task_id: Task identifier
+
+    Returns:
+        True if updated successfully
+    """
+    return create_signal_file(
+        f".orchestrator/signals/{task_id}.heartbeat",
+        content=datetime.now().isoformat()
+    )
+
+
 def monitor_with_timeout(
     task_id: str,
     signal_file: str,
     timeout: int = 1800,
-    check_interval: int = 30
+    check_interval: int = 30,
+    heartbeat_timeout: int = 300
 ) -> dict:
-    """Monitor a task with timeout, killing if it exceeds max duration.
-    
+    """Monitor a task with timeout and heartbeat checking.
+
+    Now includes heartbeat monitoring: if no heartbeat for heartbeat_timeout seconds,
+    the task is considered hung and killed early rather than waiting for full timeout.
+
     Args:
         task_id: Task identifier
         signal_file: Signal file to wait for
         timeout: Maximum seconds to wait (default 30 minutes)
-        check_interval: Seconds between checks
-        
+        check_interval: Seconds between checks (default 30)
+        heartbeat_timeout: Kill task if no heartbeat for this long (default 5 minutes)
+
     Returns:
         dict with completion status and timing info
     """
     session_name = f"worker-{task_id}"
     start_time = time.time()
-    
+    last_heartbeat_check = 0
+
     while True:
         elapsed = time.time() - start_time
-        
-        # Check if signal file appeared
-        if os.path.exists(signal_file):
-            return {
-                "completed": True,
-                "timeout": False,
-                "elapsed_seconds": int(elapsed)
-            }
-        
-        # Check timeout
+
+        # Check if signal file appeared (use atomic verification)
+        signal_path = Path(signal_file)
+        if signal_path.exists():
+            try:
+                content = signal_path.read_text()
+                if content:  # Non-empty = valid signal
+                    return {
+                        "completed": True,
+                        "timeout": False,
+                        "elapsed_seconds": int(elapsed)
+                    }
+            except Exception:
+                pass
+
+        # Check heartbeat (faster detection of hung workers)
+        if elapsed > 60:  # Only check heartbeat after 1 minute (give worker time to start)
+            heartbeat = check_heartbeat(task_id, stale_threshold=heartbeat_timeout)
+            if heartbeat["has_heartbeat"] and heartbeat["stale"]:
+                # Worker has stopped sending heartbeats - likely hung
+                save_session_logs(session_name)
+
+                subprocess.run(
+                    ["tmux", "kill-session", "-t", session_name],
+                    capture_output=True, check=False
+                )
+
+                return {
+                    "completed": False,
+                    "timeout": False,
+                    "hung": True,
+                    "elapsed_seconds": int(elapsed),
+                    "error": f"Worker appears hung (no heartbeat for {heartbeat['age_seconds']}s)"
+                }
+
+        # Check overall timeout
         if elapsed > timeout:
-            # Save logs before killing
             save_session_logs(session_name)
-            
-            # Kill the session
+
             subprocess.run(
                 ["tmux", "kill-session", "-t", session_name],
                 capture_output=True, check=False
             )
-            
+
             return {
                 "completed": False,
                 "timeout": True,
                 "elapsed_seconds": int(elapsed),
                 "error": f"Task exceeded timeout of {timeout} seconds"
             }
-        
+
         # Check if session still exists (might have crashed)
         if not check_session_exists(session_name):
             return {
@@ -455,7 +736,7 @@ def monitor_with_timeout(
                 "elapsed_seconds": int(elapsed),
                 "error": "Session terminated unexpectedly"
             }
-        
+
         time.sleep(check_interval)
 
 
@@ -482,7 +763,8 @@ def main():
     # verify-running command
     verify_parser = subparsers.add_parser("verify-running", help="Verify process is running in session")
     verify_parser.add_argument("session_name", help="Session name")
-    verify_parser.add_argument("--wait", type=int, default=5, help="Seconds to wait before checking")
+    verify_parser.add_argument("--wait", type=int, default=10, help="Seconds to wait before checking (default 10)")
+    verify_parser.add_argument("--no-early-exit", action="store_true", help="Disable early exit on failure detection")
     
     # save-logs command
     logs_parser = subparsers.add_parser("save-logs", help="Save session logs to file")
@@ -490,7 +772,22 @@ def main():
     logs_parser.add_argument("--output", help="Output file path")
     
     # cleanup-signals command
-    subparsers.add_parser("cleanup-signals", help="Remove old signal files")
+    cleanup_sig_parser = subparsers.add_parser("cleanup-signals", help="Remove old signal files")
+    cleanup_sig_parser.add_argument("--orchestration-id", help="Protect signals from this orchestration")
+    cleanup_sig_parser.add_argument("--max-age-hours", type=float, default=2.0, help="Only remove files older than this")
+
+    # heartbeat commands
+    hb_check_parser = subparsers.add_parser("check-heartbeat", help="Check worker heartbeat status")
+    hb_check_parser.add_argument("task_id", help="Task ID")
+    hb_check_parser.add_argument("--threshold", type=int, default=90, help="Stale threshold in seconds")
+
+    hb_update_parser = subparsers.add_parser("update-heartbeat", help="Update worker heartbeat")
+    hb_update_parser.add_argument("task_id", help="Task ID")
+
+    # create-signal command (atomic signal file creation)
+    sig_parser = subparsers.add_parser("create-signal", help="Create signal file atomically")
+    sig_parser.add_argument("signal_file", help="Path to signal file")
+    sig_parser.add_argument("--content", help="Optional content to write")
     
     # cleanup-orphans command
     orphans_parser = subparsers.add_parser("cleanup-orphans", help="Kill orphaned worker sessions")
@@ -544,7 +841,11 @@ def main():
             print("No worker sessions found")
             
     elif args.command == "verify-running":
-        result = verify_process_running(args.session_name, args.wait)
+        result = verify_process_running(
+            args.session_name,
+            wait_seconds=args.wait,
+            early_exit_on_failure=not args.no_early_exit
+        )
         print(json.dumps(result, indent=2))
         if not result["running"]:
             exit(1)
@@ -558,8 +859,31 @@ def main():
             exit(1)
             
     elif args.command == "cleanup-signals":
-        result = cleanup_signals()
-        print(f"✓ Removed {result['removed']} signal files")
+        result = cleanup_signals(
+            orchestration_id=args.orchestration_id,
+            max_age_hours=args.max_age_hours
+        )
+        print(f"✓ Removed {result['removed']} signal files, protected {result['protected']}")
+
+    elif args.command == "check-heartbeat":
+        result = check_heartbeat(args.task_id, stale_threshold=args.threshold)
+        print(json.dumps(result, indent=2))
+        if result.get("stale"):
+            exit(1)
+
+    elif args.command == "update-heartbeat":
+        if update_heartbeat(args.task_id):
+            print(f"✓ Updated heartbeat for {args.task_id}")
+        else:
+            print(f"✗ Failed to update heartbeat for {args.task_id}")
+            exit(1)
+
+    elif args.command == "create-signal":
+        if create_signal_file(args.signal_file, content=args.content or ""):
+            print(f"✓ Created signal file: {args.signal_file}")
+        else:
+            print(f"✗ Failed to create signal file: {args.signal_file}")
+            exit(1)
         
     elif args.command == "cleanup-orphans":
         result = cleanup_orphaned_sessions(save_logs=not args.no_save_logs)
