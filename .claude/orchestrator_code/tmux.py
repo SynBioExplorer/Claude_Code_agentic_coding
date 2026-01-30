@@ -649,6 +649,45 @@ def update_heartbeat(task_id: str) -> bool:
     )
 
 
+def check_task_blocked(task_id: str) -> dict:
+    """Check if a task is blocked (e.g., waiting for a missing dependency).
+
+    Reads the task's .task-status.json to detect blocked status.
+
+    Args:
+        task_id: Task identifier
+
+    Returns:
+        dict with blocked status and reason if blocked
+    """
+    import json as json_module
+
+    status_file = Path(f".worktrees/{task_id}/.task-status.json")
+
+    if not status_file.exists():
+        return {"blocked": False}
+
+    try:
+        content = status_file.read_text()
+        if not content.strip():
+            return {"blocked": False}
+
+        status = json_module.loads(content)
+
+        if status.get("status") == "blocked":
+            return {
+                "blocked": True,
+                "blocked_reason": status.get("blocked_reason", "Unknown"),
+                "needs_dependency": status.get("needs_dependency"),
+                "updated_at": status.get("updated_at")
+            }
+
+        return {"blocked": False}
+
+    except (json_module.JSONDecodeError, IOError):
+        return {"blocked": False}
+
+
 def monitor_with_timeout(
     task_id: str,
     signal_file: str,
@@ -656,10 +695,11 @@ def monitor_with_timeout(
     check_interval: int = 30,
     heartbeat_timeout: int = 300
 ) -> dict:
-    """Monitor a task with timeout and heartbeat checking.
+    """Monitor a task with timeout, heartbeat, and blocked status checking.
 
-    Now includes heartbeat monitoring: if no heartbeat for heartbeat_timeout seconds,
-    the task is considered hung and killed early rather than waiting for full timeout.
+    Includes:
+    - Heartbeat monitoring: kills hung workers if no heartbeat
+    - Blocked detection: returns early if worker signals it's blocked (e.g., missing dependency)
 
     Args:
         task_id: Task identifier
@@ -670,10 +710,13 @@ def monitor_with_timeout(
 
     Returns:
         dict with completion status and timing info
+        - completed: True if signal file appeared
+        - blocked: True if worker signaled blocked status
+        - timeout: True if timeout exceeded
+        - hung: True if heartbeat went stale
     """
     session_name = f"worker-{task_id}"
     start_time = time.time()
-    last_heartbeat_check = 0
 
     while True:
         elapsed = time.time() - start_time
@@ -684,6 +727,18 @@ def monitor_with_timeout(
             try:
                 content = signal_path.read_text()
                 if content:  # Non-empty = valid signal
+                    # Signal appeared - but also check if task is blocked
+                    # (worker creates signal even when blocked so orchestration doesn't hang)
+                    blocked = check_task_blocked(task_id)
+                    if blocked["blocked"]:
+                        return {
+                            "completed": False,
+                            "blocked": True,
+                            "blocked_reason": blocked.get("blocked_reason"),
+                            "needs_dependency": blocked.get("needs_dependency"),
+                            "elapsed_seconds": int(elapsed)
+                        }
+
                     return {
                         "completed": True,
                         "timeout": False,
@@ -691,6 +746,17 @@ def monitor_with_timeout(
                     }
             except Exception:
                 pass
+
+        # Check if task is blocked (even before signal appears)
+        blocked = check_task_blocked(task_id)
+        if blocked["blocked"]:
+            return {
+                "completed": False,
+                "blocked": True,
+                "blocked_reason": blocked.get("blocked_reason"),
+                "needs_dependency": blocked.get("needs_dependency"),
+                "elapsed_seconds": int(elapsed)
+            }
 
         # Check heartbeat (faster detection of hung workers)
         if elapsed > 60:  # Only check heartbeat after 1 minute (give worker time to start)
@@ -783,6 +849,10 @@ def main():
 
     hb_update_parser = subparsers.add_parser("update-heartbeat", help="Update worker heartbeat")
     hb_update_parser.add_argument("task_id", help="Task ID")
+
+    # check-blocked command
+    blocked_parser = subparsers.add_parser("check-blocked", help="Check if task is blocked")
+    blocked_parser.add_argument("task_id", help="Task ID")
 
     # create-signal command (atomic signal file creation)
     sig_parser = subparsers.add_parser("create-signal", help="Create signal file atomically")
@@ -878,6 +948,12 @@ def main():
             print(f"✗ Failed to update heartbeat for {args.task_id}")
             exit(1)
 
+    elif args.command == "check-blocked":
+        result = check_task_blocked(args.task_id)
+        print(json.dumps(result, indent=2))
+        if result.get("blocked"):
+            exit(2)  # Exit code 2 = blocked (distinguishes from error=1)
+
     elif args.command == "create-signal":
         if create_signal_file(args.signal_file, content=args.content or ""):
             print(f"✓ Created signal file: {args.signal_file}")
@@ -932,8 +1008,18 @@ def main():
             args.timeout
         )
         print(json.dumps(result, indent=2))
-        if not result["completed"]:
-            exit(1)
+
+        if result.get("blocked"):
+            # Task is blocked - needs intervention
+            print(f"\n⏸ Task {args.task_id} is BLOCKED")
+            print(f"  Reason: {result.get('blocked_reason', 'Unknown')}")
+            if result.get("needs_dependency"):
+                print(f"  Needs: {result.get('needs_dependency')}")
+            print("\n  To resolve: install the dependency and restart orchestration")
+            exit(2)  # Exit code 2 = blocked
+
+        if not result.get("completed"):
+            exit(1)  # Exit code 1 = failed/timeout
 
 
 if __name__ == "__main__":

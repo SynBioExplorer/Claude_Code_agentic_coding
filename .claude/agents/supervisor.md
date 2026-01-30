@@ -302,10 +302,25 @@ tmux kill-session -t <session-name>
 
 ## Handling Blocked Tasks
 
-Workers may signal they're blocked due to missing dependencies:
+The `monitor` command automatically detects blocked tasks:
 
 ```bash
-# Check for blocked tasks
+# Monitor returns exit code 2 if task is blocked
+python3 ~/.claude/orchestrator_code/tmux.py monitor <task-id> --signal-file .orchestrator/signals/<task-id>.done
+
+# Exit codes:
+# 0 = completed successfully
+# 1 = failed/timeout
+# 2 = blocked (needs dependency)
+```
+
+You can also check explicitly:
+
+```bash
+# Check if a specific task is blocked
+python3 ~/.claude/orchestrator_code/tmux.py check-blocked <task-id>
+
+# List all blocked tasks
 python3 ~/.claude/orchestrator_code/tasks.py blocked
 ```
 
