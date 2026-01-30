@@ -89,13 +89,14 @@ Standalone Python scripts in `~/.claude/orchestrator_code/`:
 
 | Script | Purpose | Example |
 |--------|---------|---------|
+| `tmux.py` | Tmux session management, monitoring | `python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-1 --prompt-file p.md --cwd .` |
 | `risk.py` | Compute risk score | `python3 ~/.claude/orchestrator_code/risk.py tasks.yaml` |
 | `conflict.py` | Detect file/resource conflicts | `python3 ~/.claude/orchestrator_code/conflict.py tasks.yaml` |
 | `dag.py` | Validate DAG, show execution waves | `python3 ~/.claude/orchestrator_code/dag.py tasks.yaml` |
 | `contracts.py` | Generate Protocol stubs | `python3 ~/.claude/orchestrator_code/contracts.py MyProtocol login logout -o contracts/my.py` |
 | `environment.py` | Compute/verify env hash | `python3 ~/.claude/orchestrator_code/environment.py --verify abc123` |
 | `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py init/status/resume` |
-| `tasks.py` | Check task readiness | `python3 ~/.claude/orchestrator_code/tasks.py ready tasks.yaml` |
+| `tasks.py` | Check task readiness, blocked tasks | `python3 ~/.claude/orchestrator_code/tasks.py blocked` |
 | `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
 | `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
 | `workers_view.py` | Live worker output panels | `python3 ~/.claude/orchestrator_code/workers_view.py` |
@@ -404,6 +405,35 @@ tmux capture-pane -t "worker-<task-id>" -p | tail -30
 # Or use workers_view.py for live multi-pane view
 python3 ~/.claude/orchestrator_code/workers_view.py
 ```
+
+### Handle blocked tasks (missing dependencies)
+
+If a worker discovers it needs a package that isn't installed:
+
+```bash
+# Check for blocked tasks
+python3 ~/.claude/orchestrator_code/tasks.py blocked
+
+# Or check specific task
+python3 ~/.claude/orchestrator_code/tmux.py check-blocked <task-id>
+```
+
+Output:
+```
+Task: task-data-analysis
+Reason: Missing required dependency
+Needs dependency: pandas>=2.0
+
+To resolve, install: pandas>=2.0
+Then restart orchestration.
+```
+
+The monitor command also detects blocked status automatically (exit code 2).
+
+**Why not auto-install?** Workers can't install dependencies mid-execution because:
+- It would break environment hash consistency
+- Security risk (arbitrary package installation)
+- Could cause version conflicts between workers
 
 ### Kill stuck worker
 ```bash
