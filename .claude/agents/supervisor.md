@@ -298,3 +298,34 @@ tmux kill-session -t <session-name>
 - **Agent times out**: Save logs, kill session, mark task failed
 - **Verification fails**: Do not merge, report error
 - **Merge conflict**: Should not happen with proper file ownership - escalate
+- **Task blocked (missing dependency)**: See below
+
+## Handling Blocked Tasks
+
+Workers may signal they're blocked due to missing dependencies:
+
+```bash
+# Check for blocked tasks
+python3 ~/.claude/orchestrator_code/tasks.py blocked
+```
+
+If tasks are blocked:
+
+1. **Report clearly to user**:
+   ```
+   Task task-data-analysis is BLOCKED
+   Reason: Missing required dependency
+   Needs: pandas>=2.0
+
+   To resolve: pip install pandas>=2.0
+   Then restart orchestration.
+   ```
+
+2. **Do NOT continue** - blocked tasks cannot complete without intervention
+
+3. **Clean up gracefully**:
+   - Save logs from all running sessions
+   - Kill remaining worker sessions
+   - Report full list of missing dependencies
+
+The user must install dependencies and restart. This is intentional - allowing mid-flight dependency installation would break environment consistency.

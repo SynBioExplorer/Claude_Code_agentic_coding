@@ -147,17 +147,36 @@
   <text x="350" y="644" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">sonnet • per-task</text>
   <text x="350" y="658" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="rgba(255,255,255,0.8)">Tests • Boundaries • Contracts</text>
 
-  <!-- Arrow to Integration Checker -->
-  <line x1="470" y1="635" x2="520" y2="635" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <!-- Staging Branch Indicator -->
+  <rect x="475" y="620" width="50" height="30" rx="5" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="500" y="640" text-anchor="middle" font-family="monospace" font-size="9" font-weight="600" fill="#1e40af">staging</text>
+
+  <!-- Arrow: Verifier -> Staging -->
+  <line x1="470" y1="635" x2="475" y2="635" stroke="#555" stroke-width="2"/>
+  <!-- Arrow: Staging -> Integration Checker -->
+  <line x1="525" y1="635" x2="530" y2="635" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- "merge to" label -->
+  <text x="445" y="615" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#3b82f6">merge to</text>
 
   <!-- Integration Checker Box -->
   <rect x="530" y="605" width="240" height="60" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" filter="url(#shadow)"/>
   <text x="650" y="625" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#92400e">INTEGRATION-CHECKER</text>
-  <text x="650" y="641" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • on staging branch</text>
-  <text x="650" y="655" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#92400e">Tests • Security • Pass → Promote to main</text>
+  <text x="650" y="641" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#b45309">sonnet • tests on staging</text>
+  <text x="650" y="655" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#92400e">Full Suite • Security • Type Check</text>
 
-  <!-- Arrow back to Planner for review -->
-  <path d="M 770 635 L 900 635 L 900 190 L 710 190" stroke="#555" stroke-width="2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>
+  <!-- Promote to Main indicator -->
+  <rect x="775" y="620" width="40" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" stroke-width="2"/>
+  <text x="795" y="640" text-anchor="middle" font-family="monospace" font-size="9" font-weight="600" fill="#166534">main</text>
+
+  <!-- Arrow: Integration -> Main -->
+  <line x1="770" y1="635" x2="775" y2="635" stroke="#22c55e" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- "promote" label -->
+  <text x="772" y="615" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#22c55e">promote</text>
+
+  <!-- Arrow back to Planner for review (from main) -->
+  <path d="M 815 635 L 900 635 L 900 190 L 710 190" stroke="#555" stroke-width="2" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowhead)"/>
   <text x="920" y="420" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b" transform="rotate(90 920 420)">Review Mode (max 3 iterations)</text>
 
   <!-- ==================== SIDE PANELS ==================== -->

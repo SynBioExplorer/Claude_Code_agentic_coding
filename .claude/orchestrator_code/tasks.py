@@ -55,6 +55,51 @@ def get_task_status(task_id: str, state: dict = None) -> str:
     return "pending"
 
 
+def get_task_status_details(task_id: str) -> dict:
+    """Get full status details for a task, including blocked reasons."""
+    status_file = Path(f".worktrees/{task_id}/.task-status.json")
+    if status_file.exists():
+        try:
+            return json.loads(status_file.read_text())
+        except json.JSONDecodeError:
+            return {"status": "unknown", "error": "Failed to parse status file"}
+    return {"status": "pending"}
+
+
+def get_blocked_tasks() -> list:
+    """Get tasks that are blocked waiting for dependencies or resources.
+
+    Returns list of dicts with task_id, blocked_reason, and needs_dependency.
+    """
+    blocked = []
+    worktrees = Path(".worktrees")
+
+    if not worktrees.exists():
+        return blocked
+
+    for task_dir in worktrees.iterdir():
+        if not task_dir.is_dir():
+            continue
+
+        status_file = task_dir / ".task-status.json"
+        if not status_file.exists():
+            continue
+
+        try:
+            status = json.loads(status_file.read_text())
+            if status.get("status") == "blocked":
+                blocked.append({
+                    "task_id": task_dir.name,
+                    "blocked_reason": status.get("blocked_reason", "Unknown"),
+                    "needs_dependency": status.get("needs_dependency"),
+                    "updated_at": status.get("updated_at")
+                })
+        except json.JSONDecodeError:
+            continue
+
+    return blocked
+
+
 def get_ready_tasks(tasks_file: str = "tasks.yaml") -> list:
     """Get tasks whose dependencies are all verified/merged."""
     plan = load_plan(tasks_file)
@@ -90,22 +135,27 @@ def check_all_tasks() -> dict:
 
     results = {
         "pending": [], "executing": [], "completed": [],
-        "failed": [], "verified": [], "merged": []
+        "failed": [], "verified": [], "merged": [], "blocked": []
     }
 
     for task_id in state.get("tasks", {}).keys():
         status = get_task_status(task_id, state)
         results.get(status, results["pending"]).append(task_id)
 
+    # Get blocked task details
+    blocked_details = get_blocked_tasks()
+
     total = len(state.get("tasks", {}))
     done = len(results["completed"]) + len(results["verified"]) + len(results["merged"])
 
     return {
         "results": results,
+        "blocked_details": blocked_details,
         "total": total,
         "done": done,
         "all_done": done == total,
-        "any_failed": len(results["failed"]) > 0
+        "any_failed": len(results["failed"]) > 0,
+        "any_blocked": len(results["blocked"]) > 0
     }
 
 
@@ -122,6 +172,10 @@ def main():
     # check-all command
     check_parser = subparsers.add_parser("check-all", help="Check all task statuses")
     check_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # blocked command
+    blocked_parser = subparsers.add_parser("blocked", help="List blocked tasks with reasons")
+    blocked_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
 
@@ -148,15 +202,50 @@ def main():
             print(f"  Completed: {len(r['completed'])} - {r['completed']}")
             print(f"  Verified:  {len(r['verified'])} - {r['verified']}")
             print(f"  Merged:    {len(r['merged'])} - {r['merged']}")
+            print(f"  Blocked:   {len(r['blocked'])} - {r['blocked']}")
             print(f"  Failed:    {len(r['failed'])} - {r['failed']}")
+
+            # Show blocked details if any
+            if result.get("blocked_details"):
+                print("\nBlocked Task Details:")
+                for b in result["blocked_details"]:
+                    print(f"  {b['task_id']}: {b['blocked_reason']}")
+                    if b.get("needs_dependency"):
+                        print(f"    Needs: {b['needs_dependency']}")
 
             if result["all_done"]:
                 print("\n✓ All tasks completed")
+            elif result["any_blocked"]:
+                print("\n⏸ Some tasks blocked - see details above")
+                print("  To resolve: install missing dependencies and restart orchestration")
             elif result["any_failed"]:
                 print("\n✗ Some tasks failed")
             else:
                 still_running = len(r["executing"])
                 print(f"\n... {still_running} task(s) still running")
+
+    elif args.command == "blocked":
+        blocked = get_blocked_tasks()
+        if args.json:
+            print(json.dumps({"blocked": blocked}, indent=2))
+        else:
+            if not blocked:
+                print("No blocked tasks")
+            else:
+                print("\nBlocked Tasks:")
+                for b in blocked:
+                    print(f"\n  Task: {b['task_id']}")
+                    print(f"  Reason: {b['blocked_reason']}")
+                    if b.get("needs_dependency"):
+                        print(f"  Needs dependency: {b['needs_dependency']}")
+                    if b.get("updated_at"):
+                        print(f"  Since: {b['updated_at']}")
+
+                # Collect all needed dependencies
+                deps = [b["needs_dependency"] for b in blocked if b.get("needs_dependency")]
+                if deps:
+                    print(f"\nTo resolve, install: {', '.join(deps)}")
+                    print("Then restart orchestration.")
 
 
 if __name__ == "__main__":

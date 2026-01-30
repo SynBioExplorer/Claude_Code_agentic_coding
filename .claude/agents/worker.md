@@ -258,6 +258,34 @@ If you encounter an error:
 }
 ```
 
+## Missing Dependency Handling
+
+If you discover you need a Python package or dependency that isn't installed:
+
+1. **Do NOT try to install it yourself** - you cannot modify lockfiles
+2. **Signal that you're blocked** by updating `.task-status.json`:
+
+```json
+{
+  "task_id": "task-a",
+  "status": "blocked",
+  "blocked_reason": "Missing required dependency",
+  "needs_dependency": "pandas>=2.0",
+  "updated_at": "<ISO timestamp>"
+}
+```
+
+3. **Create the signal file** so orchestration doesn't hang:
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py create-signal <project-root>/.orchestrator/signals/<task-id>.done
+```
+
+The Supervisor will detect the blocked status and report which dependencies are needed. The user can then:
+1. Install the missing dependencies
+2. Restart orchestration
+
+**Note:** This is intentional - allowing workers to install arbitrary packages mid-execution would break environment consistency and create security risks.
+
 ## Shared Context
 
 Query the shared context for project-wide decisions and patterns:
