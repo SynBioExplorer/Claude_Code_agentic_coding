@@ -128,6 +128,48 @@ python3 ~/.claude/orchestrator_code/environment.py --verify <expected-hash>
 
 Compare task's environment hash with global state. They MUST match.
 
+### 6. Contract Type Verification (REQUIRED)
+
+**If the task implements or uses a contract, type checking is MANDATORY.**
+
+This catches signature mismatches that unit tests might miss (e.g., `def auth(user: str)` vs `def auth(user: User)`).
+
+```bash
+cd .worktrees/<task-id>
+
+# Option A: Run mypy/pyright against implementation files
+mypy --strict src/services/<implementation>.py
+# or
+pyright src/services/<implementation>.py
+
+# Option B: Runtime Protocol check (Python 3.12+)
+python3 -c "
+from typing import runtime_checkable, Protocol
+from contracts.<name> import <ContractProtocol>
+from src.services.<impl> import <ImplementationClass>
+
+# This will raise TypeError if signatures don't match
+assert isinstance(<ImplementationClass>(), <ContractProtocol>)
+"
+
+# Option C: For TypeScript
+npx tsc --noEmit src/services/<implementation>.ts
+```
+
+**Failure here is category `contract_mismatch` and blocks merge.**
+
+| Language | Tool | Command |
+|----------|------|---------|
+| Python | mypy | `mypy --strict <file>` |
+| Python | pyright | `pyright <file>` |
+| TypeScript | tsc | `npx tsc --noEmit <file>` |
+| Rust | cargo | `cargo check` (built-in) |
+| Go | go vet | `go vet ./...` (built-in) |
+
+**Skip this step ONLY if:**
+- Task has no contract dependencies (standalone utility)
+- Language has no static type checker available
+
 ## Boundary Validation Details
 
 ### Forbidden Patterns

@@ -221,12 +221,19 @@ The system uses a **two-tier verification** approach where each agent owns its m
 **Tier 1: Per-Task Verification (haiku)**
 1. Worker marks task `completed` in `.task-status.json`
 2. Supervisor spawns Verifier agent for THAT task
-3. Verifier checks: task tests, file boundaries, contract versions, environment hash
+3. Verifier checks:
+   - Task tests (pytest, npm test, etc.)
+   - File boundaries (only files in `files_write` modified)
+   - Contract versions consistency
+   - Environment hash matching
+   - **Contract type verification (REQUIRED)**: `mypy --strict` or equivalent to catch signature mismatches
 4. **If passed: Verifier merges task to staging** (atomic verify-then-merge)
 5. Verifier signals `.verified` (merged) or `.failed` (no merge)
 6. **Incremental integration check**: Supervisor runs full test suite on staging immediately
    - If tests fail, we know exactly which task broke the build
    - No need to wait for all tasks to find integration issues
+
+**Why contract type verification?** Unit tests might not catch type mismatches (e.g., `def auth(user: str)` vs `def auth(user: User)`). Static type checking catches these before integration.
 
 **Tier 2: Final Integration Check (sonnet)**
 After all tasks have `.verified` signals AND incremental checks passed:
@@ -248,6 +255,21 @@ After integration passes and staging is promoted to main:
 - Planner-architect (opus) reviews the integrated result holistically
 - Evaluates: Does implementation fulfill the request? Is architecture coherent?
 - Accept or iterate (max 3 iterations)
+- If max iterations reached → **Escalation Protocol**
+
+### 5. Escalation Protocol
+
+After max iterations (3) without successful review, orchestration cannot simply retry:
+
+1. **Pause**: Stop all retry attempts
+2. **Preserve state**: Keep staging branch, worktrees, and logs for debugging
+3. **Generate report**: `.orchestrator/escalation-report.md` with root cause analysis
+4. **Present options to user**:
+   - **Manual fix**: User fixes issues, runs `state.py resume`
+   - **Re-plan**: Generate new tasks.yaml with different decomposition
+   - **Abort**: Clean up everything, restore main to original commit
+
+**Why user decides:** Automatic rollback could discard valuable partial progress. Re-planning could repeat the same mistakes. Only the user has context to make the right call.
 
 ## Task Specification Format
 

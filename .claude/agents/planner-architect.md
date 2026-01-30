@@ -291,3 +291,88 @@ These are the Supervisor's responsibilities.
 When in Review Mode, evaluate the merged work and either:
 - Approve and complete the orchestration
 - Reject with specific feedback for iteration (max 3 iterations total)
+- If max iterations reached, trigger **Escalation Protocol**
+
+## Escalation Protocol
+
+After max iterations (default: 3), orchestration cannot simply retry. Escalation means:
+
+### 1. Pause Orchestration
+
+Stop all retry attempts. Do not spawn more workers or verifiers.
+
+### 2. Preserve State for Debugging
+
+Keep all artifacts intact:
+- `staging` branch with merged (possibly broken) code
+- `.worktrees/` directories for failed tasks
+- `.orchestrator/logs/` with agent outputs
+- `tasks.yaml` and `contracts/` for context
+
+### 3. Generate Escalation Report
+
+Create `.orchestrator/escalation-report.md`:
+
+```markdown
+# Escalation Report
+
+## Summary
+Orchestration failed after 3 iterations.
+
+## Failed Tasks
+| Task | Failure Category | Last Error |
+|------|------------------|------------|
+| task-a | logic_error | AssertionError in test_auth.py:42 |
+| task-b | contract_mismatch | Method signature differs from Protocol |
+
+## Root Cause Analysis
+<Your analysis of why iterations didn't resolve the issue>
+
+## Artifacts Preserved
+- staging branch: contains merged work (may be broken)
+- .worktrees/task-a/: failed task worktree
+- .orchestrator/logs/: agent outputs
+
+## Options
+1. **Manual Intervention**: User fixes issues, runs `state.py resume`
+2. **Re-Plan**: Generate new tasks.yaml with different decomposition
+3. **Abort**: Clean up all state, restore main to original commit
+```
+
+### 4. Present Options to User
+
+**Do NOT automatically rollback or re-plan.** Present the options:
+
+```
+ORCHESTRATION ESCALATED (3 iterations failed)
+=============================================
+
+Root cause: <brief summary>
+
+Options:
+  [1] Manual fix - I'll keep state, you fix and resume
+  [2] Re-plan - I'll generate a new decomposition
+  [3] Abort - Clean up everything, restore main
+
+Which option? [1/2/3]
+```
+
+### 5. Execute User's Choice
+
+| Choice | Action |
+|--------|--------|
+| Manual fix | Exit, preserve state, user runs `state.py resume` after fixing |
+| Re-plan | Delete tasks.yaml, re-analyze request, generate new plan |
+| Abort | Run cleanup: `git checkout main && git branch -D staging && git worktree prune` |
+
+### Why User Decides
+
+Automatic rollback could discard valuable partial progress. Re-planning could repeat the same mistakes. Only the user has context to make the right call.
+
+### Escalation Triggers
+
+Escalation happens when:
+1. Max iterations (3) reached without successful review
+2. Unrecoverable error (e.g., git corruption, missing dependencies that can't be installed)
+3. Contract requires 3rd renegotiation (architectural mismatch)
+4. Integration tests fail repeatedly with no clear fix
