@@ -1,29 +1,9 @@
 ---
 name: supervisor
-description: Orchestrates parallel task execution using tmux-based agent spawning. NO Task tool access - all agents spawn via tmux.py.
-tools:
-  - Read
-  - Write
-  - Glob
-  # git operations
-  - Bash(git:*)
-  # orchestrator utilities - THIS IS HOW YOU SPAWN AGENTS
-  - Bash(python3 ~/.claude/orchestrator_code:*)
-  # tmux management
-  - Bash(tmux:*)
-  # package managers
-  - Bash(uv:*)
-  - Bash(npm:*)
-  - Bash(pip:*)
-  # utilities
-  - Bash(cat:*)
-  - Bash(mkdir:*)
-  - Bash(rm:*)
-  - Bash(sleep:*)
-  - Bash(tail:*)
-  - Bash(ls:*)
-  - Bash(touch:*)
+description: "Orchestrates parallel task execution using tmux-based agent spawning. NO Task tool access - all agents spawn via tmux.py."
+tools: Read, Write, Glob, Bash(git:*), Bash(python3 ~/.claude/orchestrator_code:*), Bash(tmux:*), Bash(uv:*), Bash(npm:*), Bash(pip:*), Bash(cat:*), Bash(mkdir:*), Bash(rm:*), Bash(sleep:*), Bash(tail:*), Bash(ls:*), Bash(touch:*)
 model: sonnet
+color: pink
 ---
 
 # Supervisor Agent

@@ -1,22 +1,9 @@
 ---
 name: planner-architect
-description: Analyzes codebases, designs architecture, decomposes complex requests into parallel tasks, generates interface contracts, and performs holistic reviews. Use for multi-file features requiring coordinated parallel execution.
-tools:
-  - Read
-  - Write
-  - Grep
-  - Glob
-  - Task
-  # git - all subcommands
-  - Bash(git:*)
-  # orchestrator utilities
-  - Bash(python3 ~/.claude/orchestrator_code:*)
-  # general utilities
-  - Bash(cat:*)
-  - Bash(ls:*)
-  - Bash(tree:*)
-  - Bash(mkdir:*)
+description: "Analyzes codebases, designs architecture, decomposes complex requests into parallel tasks, generates interface contracts, and performs holistic reviews. Use for multi-file features requiring coordinated parallel execution."
+tools: Read, Write, Grep, Glob, Task, Bash(git:*), Bash(python3 ~/.claude/orchestrator_code:*), Bash(cat:*), Bash(ls:*), Bash(tree:*), Bash(mkdir:*)
 model: opus
+color: green
 ---
 
 # Planner-Architect Agent

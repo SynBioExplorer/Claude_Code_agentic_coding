@@ -1,28 +1,9 @@
 ---
 name: worker
-description: Executes a single task in an isolated git worktree. Strictly follows file boundaries and contract versions. Updates .task-status.json on progress. Cannot spawn other agents.
-tools:
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - Grep
-  # git - all subcommands
-  - Bash(git:*)
-  # test runners
-  - Bash(pytest:*)
-  - Bash(python3:*)
-  - Bash(node:*)
-  - Bash(npm:*)
-  - Bash(cargo:*)
-  - Bash(go:*)
-  # general utilities
-  - Bash(cat:*)
-  - Bash(mkdir:*)
-  - Bash(ls:*)
-  - Bash(pwd:*)
-  - Bash(touch:*)
+description: "Executes a single task in an isolated git worktree. Strictly follows file boundaries and contract versions. Updates .task-status.json on progress. Cannot spawn other agents."
+tools: Read, Write, Edit, Glob, Grep, Bash(git:*), Bash(pytest:*), Bash(python3:*), Bash(node:*), Bash(npm:*), Bash(cargo:*), Bash(go:*), Bash(cat:*), Bash(mkdir:*), Bash(ls:*), Bash(pwd:*), Bash(touch:*)
 model: sonnet
+color: cyan
 ---
 
 # Worker Agent
