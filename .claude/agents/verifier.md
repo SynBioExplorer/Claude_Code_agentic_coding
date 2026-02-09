@@ -20,6 +20,7 @@ tools:
   - Bash(ls:*)
   - Bash(touch:*)
 model: haiku
+color: purple
 ---
 
 # Verifier Agent

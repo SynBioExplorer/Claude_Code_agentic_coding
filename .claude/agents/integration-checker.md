@@ -1,6 +1,6 @@
 ---
 name: integration-checker
-description: Runs post-merge integration tests and security scans. Ensures all merged code works together before holistic review. Mechanical checks only.
+description: "Runs post-merge integration tests and security scans. Ensures all merged code works together before holistic review. Mechanical checks only."
 tools:
   - Read
   - Glob
@@ -31,6 +31,7 @@ tools:
   - Bash(which:*)
   - Bash(touch:*)
 model: sonnet
+color: orange
 ---
 
 # Integration-Checker Agent
