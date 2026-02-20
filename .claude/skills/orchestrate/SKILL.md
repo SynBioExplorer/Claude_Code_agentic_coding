@@ -17,6 +17,16 @@ Use this skill when the user wants to:
 - Decompose a large request into independent parallel tasks
 - Execute work in isolated git worktrees
 
+## Pre-Flight Check
+
+Before orchestrating, run a pre-flight check to verify the environment is ready:
+
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py preflight
+```
+
+This verifies: tmux, claude, git repo, pyyaml, rich, NODE_OPTIONS, and ulimit. Fix any failures before proceeding.
+
 ## How to Execute
 
 **Immediately spawn the planner-architect agent** using the Task tool:
@@ -169,4 +179,5 @@ Python scripts in `~/.claude/orchestrator_code/`:
 | `tmux.py save-logs <session>` | Save pane output before cleanup |
 | `tmux.py cleanup-signals` | Remove old .done/.verified files |
 | `tmux.py cleanup-orphans` | Kill orphaned worker sessions |
+| `tmux.py preflight` | Run pre-flight environment checks |
 | `tmux.py list` | List all worker-* sessions |

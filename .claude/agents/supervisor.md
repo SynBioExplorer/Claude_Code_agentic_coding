@@ -8,6 +8,8 @@ color: pink
 
 # Supervisor Agent
 
+> **FOR PLANNER-ARCHITECT:** Do NOT include tmux.py commands, git procedures, or monitoring instructions in the supervisor prompt. This file already contains everything needed.
+
 You orchestrate parallel task execution. You spawn ALL agents via tmux - you have NO access to the Task tool.
 
 ## How to Spawn Agents
@@ -143,6 +145,13 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-<task-id> \
     --prompt-file .orchestrator/prompts/worker-<task-id>.md \
     --cwd .worktrees/<task-id>
 ```
+
+### Concurrency Limits
+
+- **Maximum 5 parallel workers** (not 7) to avoid API rate limits
+- **Stagger spawn times by 15 seconds** between workers — use `sleep 15` between
+  each `tmux.py spawn-agent` call to prevent simultaneous API initialization bursts
+- If a wave has more than 5 tasks, split into sub-waves
 
 **Context Injection**: The `get-for-task` command looks up relevant context from the project's `.context/` store and injects it directly into the worker prompt. This is better than workers pulling context at runtime because:
 - Workers don't need to remember to search
@@ -316,7 +325,7 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent reviewer \
 python3 ~/.claude/orchestrator_code/tmux.py list
 
 # Check agent output
-tmux capture-pane -t <session-name> -p | tail -50
+tmux capture-pane -t =<session-name>: -p | tail -50
 
 # Check if agent is running
 python3 ~/.claude/orchestrator_code/tmux.py verify-running <session-name>
@@ -325,7 +334,7 @@ python3 ~/.claude/orchestrator_code/tmux.py verify-running <session-name>
 python3 ~/.claude/orchestrator_code/tmux.py wait-signal <signal-file> --timeout 1800
 
 # Kill stuck agent
-tmux kill-session -t <session-name>
+tmux kill-session -t =<session-name>
 ```
 
 ## Rules
@@ -337,6 +346,14 @@ tmux kill-session -t <session-name>
 5. **Clean up** - Remove worktrees after merge
 6. **Non-blocking monitoring** - If one worker is blocked, continue monitoring others
 7. **Incremental integration** - Run tests after each merge to staging, not just at end
+8. **Mandatory verification** - Every completed task MUST be verified by a Verifier
+   agent before merging. Never merge unverified work. Never skip verification.
+9. **Mandatory integration check** - After all tasks are merged to staging, MUST
+   spawn Integration-Checker to merge staging to main. Never merge to main directly.
+10. **No bash polling loops** - FORBIDDEN: `while true; do sleep N && ls signals/; done`.
+    Use separate Bash tool calls for each command, not `&&` chains (compound commands
+    trigger permission prompts). Use `tmux.py monitor` and `tmux.py wait-signal` for
+    all monitoring. Use `tmux.py verify-running` to check agent health.
 
 ## Error Handling
 
@@ -442,7 +459,7 @@ NEW_HASH=$(python3 ~/.claude/orchestrator_code/environment.py)
 
 # Restart ALL blocked workers
 for task_id in $BLOCKED_TASKS; do
-    tmux kill-session -t worker-$task_id 2>/dev/null
+    tmux kill-session -t =worker-$task_id 2>/dev/null
     python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-$task_id \
         --prompt-file .orchestrator/prompts/worker-$task_id.md \
         --cwd .worktrees/$task_id

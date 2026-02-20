@@ -83,7 +83,7 @@ def capture_pane(target: str, lines: int = 20) -> str:
     """
     try:
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", target, "-p", "-S", f"-{lines}"],
+            ["tmux", "capture-pane", "-t", f"={target}:", "-p", "-S", f"-{lines}"],
             capture_output=True, text=True
         )
         if result.returncode == 0:

@@ -138,7 +138,7 @@ def setup_worker_panes(task_ids: list):
 
     # Check if workers session exists
     result = subprocess.run(
-        ["tmux", "has-session", "-t", workers_session],
+        ["tmux", "has-session", "-t", f"={workers_session}"],
         capture_output=True
     )
     if result.returncode != 0:
@@ -150,24 +150,24 @@ def setup_worker_panes(task_ids: list):
 
         if i == 0:
             # First pane - use existing pane, kill any placeholder
-            subprocess.run(["tmux", "send-keys", "-t", workers_session, "C-c"], capture_output=True)
+            subprocess.run(["tmux", "send-keys", "-t", f"={workers_session}:", "C-c"], capture_output=True)
             time.sleep(0.1)
         else:
             # Split for additional workers
             split_flag = "-h" if i % 2 == 1 else "-v"
             subprocess.run([
-                "tmux", "split-window", "-t", workers_session, split_flag
+                "tmux", "split-window", "-t", f"={workers_session}:", split_flag
             ], capture_output=True)
 
         # Show live output from this worker
-        watch_cmd = f"watch -n1 'tmux capture-pane -t {worker_session} -p -S -30 2>/dev/null || echo \"[{task_id}] waiting...\"'"
+        watch_cmd = f"watch -n1 'tmux capture-pane -t ={worker_session}: -p -S -30 2>/dev/null || echo \"[{task_id}] waiting...\"'"
         subprocess.run([
-            "tmux", "send-keys", "-t", workers_session, watch_cmd, "Enter"
+            "tmux", "send-keys", "-t", f"={workers_session}:", watch_cmd, "Enter"
         ], capture_output=True)
 
     # Rebalance all panes
     subprocess.run([
-        "tmux", "select-layout", "-t", workers_session, "tiled"
+        "tmux", "select-layout", "-t", f"={workers_session}:", "tiled"
     ], capture_output=True)
 
     print(f"Set up {len(task_ids)} worker panes")
@@ -180,7 +180,7 @@ def add_worker_pane(task_id: str):
 
     # Check if workers session exists
     result = subprocess.run(
-        ["tmux", "has-session", "-t", workers_session],
+        ["tmux", "has-session", "-t", f"={workers_session}"],
         capture_output=True
     )
     if result.returncode != 0:
@@ -189,31 +189,31 @@ def add_worker_pane(task_id: str):
 
     # Count existing panes
     result = subprocess.run(
-        ["tmux", "list-panes", "-t", workers_session, "-F", "#{pane_index}"],
+        ["tmux", "list-panes", "-t", f"={workers_session}", "-F", "#{pane_index}"],
         capture_output=True, text=True
     )
     pane_count = len(result.stdout.strip().split('\n')) if result.stdout.strip() else 0
 
     if pane_count == 1:
         # First worker - kill any placeholder command and use existing pane
-        subprocess.run(["tmux", "send-keys", "-t", workers_session, "C-c"], capture_output=True)
+        subprocess.run(["tmux", "send-keys", "-t", f"={workers_session}:", "C-c"], capture_output=True)
         time.sleep(0.2)
     else:
         # Split for new worker - alternate horizontal/vertical for tiled layout
         split_flag = "-h" if pane_count % 2 == 1 else "-v"
         subprocess.run([
-            "tmux", "split-window", "-t", workers_session, split_flag
+            "tmux", "split-window", "-t", f"={workers_session}:", split_flag
         ], capture_output=True)
 
     # Show live output from worker session
-    watch_cmd = f"watch -n1 'tmux capture-pane -t {worker_session} -p -S -30 2>/dev/null || echo \"[{task_id}] waiting/completed\"'"
+    watch_cmd = f"watch -n1 'tmux capture-pane -t ={worker_session}: -p -S -30 2>/dev/null || echo \"[{task_id}] waiting/completed\"'"
     subprocess.run([
-        "tmux", "send-keys", "-t", workers_session, watch_cmd, "Enter"
+        "tmux", "send-keys", "-t", f"={workers_session}:", watch_cmd, "Enter"
     ], capture_output=True)
 
     # Rebalance panes to tile layout
     subprocess.run([
-        "tmux", "select-layout", "-t", workers_session, "tiled"
+        "tmux", "select-layout", "-t", f"={workers_session}:", "tiled"
     ], capture_output=True)
 
     print(f"Added worker pane for {task_id}")
@@ -222,7 +222,7 @@ def add_worker_pane(task_id: str):
 def close_monitoring():
     """Close monitoring sessions."""
     # Kill the workers tmux session
-    result = subprocess.run(["tmux", "kill-session", "-t", "orchestrator-workers"], capture_output=True)
+    result = subprocess.run(["tmux", "kill-session", "-t", "=orchestrator-workers"], capture_output=True)
     if result.returncode == 0:
         print("Closed orchestrator-workers tmux session")
     else:
@@ -236,7 +236,7 @@ def status():
     """Show status of monitoring components."""
     # Check workers tmux session
     result = subprocess.run(
-        ["tmux", "has-session", "-t", "orchestrator-workers"],
+        ["tmux", "has-session", "-t", "=orchestrator-workers"],
         capture_output=True
     )
     workers_status = "running" if result.returncode == 0 else "not running"

@@ -306,13 +306,18 @@ You are running in a headless tmux session. The Supervisor monitors signal files
 **When you complete your task:**
 
 1. First, ensure all your code changes are committed in the worktree
-2. Run verification commands to confirm everything works
-3. Create the signal file using the tmux.py utility (NOT touch - touch creates empty files which are ignored):
+2. Ensure your worktree is clean — all changes committed, no untracked files:
+   ```bash
+   git add -A && git status  # Should show "nothing to commit, working tree clean"
+   ```
+   If there are uncommitted changes, commit them before proceeding.
+3. Run verification commands to confirm everything works
+4. Create the signal file using the tmux.py utility (NOT touch - touch creates empty files which are ignored):
    ```bash
    # Signal file MUST be in project root, use absolute path
    python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/<your-task-id>.done
    ```
-4. Update `.task-status.json` to status "completed"
+5. Update `.task-status.json` to status "completed"
 
 **CRITICAL NOTES:**
 - **DO NOT USE `touch`** - it creates empty files which the signal detection ignores

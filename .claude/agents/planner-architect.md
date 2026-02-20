@@ -238,34 +238,28 @@ When plan is approved (either auto-approved with risk ≤ 25, or user-approved):
 
 **IMPORTANT: Do NOT attempt to execute tasks yourself. You MUST delegate to the Supervisor agent.**
 
-Use the Task tool to spawn the Supervisor:
+Use the Task tool to spawn the Supervisor with a MINIMAL prompt:
 
-```
-Task tool parameters:
 - subagent_type: "supervisor"
 - model: "sonnet"
 - prompt: |
-    Execute the orchestration plan in tasks.yaml.
+    Execute the orchestration plan.
 
-    Project directory: <absolute path to project root>
-    Environment hash: <hash from python3 ~/.claude/orchestrator_code/environment.py>
+    Project directory: <absolute path>
+    Tasks file: <path to tasks.yaml>
+    Environment hash: <hash>
+    Original request: <user's request>
 
-    Follow your execution flow:
-    1. Stage 0: Initialize (validate DAG)
-    2. Stage 0.5: Environment setup
-    3. Stage 1: Create worktrees
-    4. Stage 2: Spawn workers in tmux
-    5. Stage 3-6: Monitor, verify, merge, review
+    Follow your standard operating procedures from your system instructions.
+    Use `python3 ~/.claude/orchestrator_code/context.py get-for-task <id>` to inject context into worker prompts.
 
-    Original request: <user's original request>
-```
+**Do NOT include in the prompt:**
+- Git commands or worktree instructions (supervisor.md has them)
+- tmux.py API docs or command syntax (supervisor.md has them)
+- Monitoring loop implementations (supervisor.md has them)
+- Step-by-step verification or merge procedures (supervisor.md has them)
 
-The Supervisor will:
-1. Create git worktrees for each task
-2. Spawn worker agents in tmux sessions (true parallelism)
-3. Monitor progress and handle verification
-4. Merge verified tasks
-5. Call you back in REVIEW MODE when complete
+The supervisor's agent file already contains all operational instructions.
 
 **Do NOT:**
 - Create tmux sessions yourself

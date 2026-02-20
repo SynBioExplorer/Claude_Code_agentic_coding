@@ -336,7 +336,7 @@ def resume_orchestration(dry_run: bool = False, open_monitoring: bool = True) ->
                         task_id = session.replace('worker-', '')
                         if task_id in tasks_to_restart:
                             subprocess.run(
-                                ["tmux", "kill-session", "-t", session],
+                                ["tmux", "kill-session", "-t", f"={session}"],
                                 capture_output=True, check=False
                             )
         except Exception:

@@ -16,6 +16,7 @@ Usage:
 """
 
 import os
+import shlex
 import subprocess
 import time
 import shutil
@@ -103,19 +104,18 @@ def wait_for_signal_file(signal_file: str, timeout: int = 600, poll_interval: fl
 def create_worker_session(
     session_name: str,
     cwd: str = None,
-    verify_claude: bool = True,
-    init_timeout: float = 5.0
+    init_timeout: float = 1.0
 ) -> dict:
-    """Create a tmux session for a worker with proper shell initialization.
+    """Create a tmux session for a worker with resolved PATH and NODE_OPTIONS.
 
-    This ensures conda and claude commands are available on macOS by
-    sourcing shell profile files. Includes verification that claude is available.
+    Instead of sourcing shell profiles (fragile — many .zshrc files exit early
+    in non-interactive shells, conda paths vary per machine), this resolves the
+    absolute path to `claude` once at startup and exports PATH + NODE_OPTIONS.
 
     Args:
         session_name: Name for the tmux session
         cwd: Working directory for the session (optional)
-        verify_claude: Whether to verify 'claude' command is available (default True)
-        init_timeout: Seconds to wait for shell initialization (default 5.0)
+        init_timeout: Seconds to wait for shell settle (default 1.0)
 
     Returns:
         dict with success status and any error message
@@ -133,66 +133,39 @@ def create_worker_session(
         if result.returncode != 0:
             return {"success": False, "error": f"Failed to create session: {result.stderr}"}
 
-        # Source shell profile to ensure conda/claude are available
-        # This is critical for macOS where PATH isn't set in non-interactive shells
-        # NOTE: Many .zshrc files have `[[ $- != *i* ]] && return` which exits early
-        # in non-interactive shells. We explicitly source conda first to avoid this.
+        # Resolve claude path once at startup (no profile sourcing needed)
+        claude_path = shutil.which("claude")
+        if not claude_path:
+            # Fallback: check common locations
+            for candidate in [
+                os.path.expanduser("~/.local/bin/claude"),
+                "/usr/local/bin/claude",
+            ]:
+                if os.path.isfile(candidate):
+                    claude_path = candidate
+                    break
+
+        # Set PATH, NODE_OPTIONS for 16GB heap, and store claude path
         init_cmd = (
-            "source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || "
-            "source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || "
-            "source /opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh 2>/dev/null || "
-            "source ~/.zshrc 2>/dev/null || "
-            "source ~/.bash_profile 2>/dev/null || "
+            f"export PATH={os.path.dirname(claude_path or '')}:$PATH; "
+            "export NODE_OPTIONS='--max-old-space-size=16384'; "
             "true"
         )
         subprocess.run(
-            ["tmux", "send-keys", "-t", unique_session, init_cmd, "Enter"],
+            ["tmux", "send-keys", "-t", f"={unique_session}:", init_cmd, "Enter"],
             capture_output=True, check=False
         )
+        time.sleep(init_timeout)  # 1s settle (was 5s)
 
-        # Wait for shell initialization (increased from 0.5s to configurable, default 5s)
-        # This is critical for conda activation which can take 1-3 seconds on cold start
-        time.sleep(init_timeout)
-
-        # Verify claude command is available if requested
-        if verify_claude:
-            # Use 'which claude' to verify command is in PATH
-            verify_cmd = "which claude > /dev/null 2>&1 && echo 'CLAUDE_OK' || echo 'CLAUDE_NOT_FOUND'"
-            subprocess.run(
-                ["tmux", "send-keys", "-t", unique_session, verify_cmd, "Enter"],
-                capture_output=True, check=False
-            )
-            time.sleep(0.5)
-
-            # Capture pane output to check result
-            capture_result = subprocess.run(
-                ["tmux", "capture-pane", "-t", unique_session, "-p", "-S", "-5"],
-                capture_output=True, text=True, timeout=5
-            )
-            output = capture_result.stdout if capture_result.returncode == 0 else ""
-
-            if "CLAUDE_NOT_FOUND" in output:
-                # Clean up the session we created
-                subprocess.run(
-                    ["tmux", "kill-session", "-t", unique_session],
-                    capture_output=True, check=False
-                )
-                return {
-                    "success": False,
-                    "error": "claude command not found in PATH after shell initialization. "
-                             "Ensure claude is installed and PATH is correctly set in shell profile."
-                }
-
-        # Now that we've verified the session works, kill any old session with the target name
-        # and rename our session to the target name
+        # Kill any old session with the target name and rename ours
         subprocess.run(
-            ["tmux", "kill-session", "-t", session_name],
+            ["tmux", "kill-session", "-t", f"={session_name}"],
             capture_output=True, check=False
         )
 
         # Rename our uniquely-named session to the requested name
         subprocess.run(
-            ["tmux", "rename-session", "-t", unique_session, session_name],
+            ["tmux", "rename-session", "-t", f"={unique_session}", session_name],
             capture_output=True, check=False
         )
 
@@ -202,7 +175,7 @@ def create_worker_session(
         # Try to clean up on error
         try:
             subprocess.run(
-                ["tmux", "kill-session", "-t", unique_session],
+                ["tmux", "kill-session", "-t", f"={unique_session}"],
                 capture_output=True, check=False
             )
         except Exception:
@@ -222,7 +195,7 @@ def send_command(session_name: str, command: str) -> dict:
     """
     try:
         result = subprocess.run(
-            ["tmux", "send-keys", "-t", session_name, command, "Enter"],
+            ["tmux", "send-keys", "-t", f"={session_name}:", command, "Enter"],
             capture_output=True, text=True
         )
         return {"success": result.returncode == 0}
@@ -233,7 +206,7 @@ def send_command(session_name: str, command: str) -> dict:
 def check_session_exists(session_name: str) -> bool:
     """Check if a tmux session exists."""
     result = subprocess.run(
-        ["tmux", "has-session", "-t", session_name],
+        ["tmux", "has-session", "-t", f"={session_name}"],
         capture_output=True
     )
     return result.returncode == 0
@@ -241,127 +214,73 @@ def check_session_exists(session_name: str) -> bool:
 
 def verify_process_running(
     session_name: str,
-    wait_seconds: int = 10,
-    early_exit_on_failure: bool = True
+    wait_seconds: int = 3,
 ) -> dict:
-    """Verify that a process is actually running in the tmux session.
+    """Verify that a process is running in the tmux session using process-based detection.
 
-    Captures pane output and checks for signs of activity or failure.
-    Increased default wait from 5s to 10s to handle larger model initialization.
+    Instead of parsing pane output for error strings (which produces false positives
+    because Claude Code's normal output contains "error:", "Error:", etc.), this checks
+    what process is actually running via `tmux list-panes -F #{pane_current_command}`.
+
+    - If a non-shell process (node, claude, python, etc.) is running: report running=True
+    - If a bare shell is running: the spawned process hasn't started or has exited;
+      only then check pane output for shell-level errors (command not found, etc.)
 
     Args:
         session_name: Target tmux session
-        wait_seconds: Seconds to wait before checking (default 10, increased from 5)
-        early_exit_on_failure: If True, check for failures during wait period
+        wait_seconds: Seconds to wait before checking (default 3)
 
     Returns:
-        dict with running status, output sample, and any detected errors
+        dict with running status and diagnostic info
     """
-    # Early failure detection during wait period
-    if early_exit_on_failure:
-        check_interval = 1.0
-        elapsed = 0.0
-
-        while elapsed < wait_seconds:
-            if not check_session_exists(session_name):
-                return {"running": False, "error": "Session does not exist"}
-
-            # Quick check for early failures
-            try:
-                result = subprocess.run(
-                    ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-20"],
-                    capture_output=True, text=True, timeout=5
-                )
-                output = result.stdout if result.returncode == 0 else ""
-
-                # Check for critical failures that warrant early exit
-                critical_failures = [
-                    "command not found",
-                    "No such file or directory",
-                    "Permission denied",
-                    "CLAUDE_NOT_FOUND",
-                    "ModuleNotFoundError",
-                    "segmentation fault",
-                    "killed",
-                    "OOM",
-                ]
-
-                for failure in critical_failures:
-                    if failure.lower() in output.lower():
-                        return {
-                            "running": False,
-                            "error": f"Early failure detected: {failure}",
-                            "output_sample": output[-500:] if len(output) > 500 else output,
-                            "elapsed_before_failure": elapsed
-                        }
-            except Exception:
-                pass
-
-            time.sleep(check_interval)
-            elapsed += check_interval
-    else:
-        time.sleep(wait_seconds)
+    time.sleep(wait_seconds)
 
     if not check_session_exists(session_name):
         return {"running": False, "error": "Session does not exist"}
 
-    # Capture recent output for final check
+    # Check what process is running in the pane
+    shell_names = {"zsh", "bash", "sh", "fish", "-zsh", "-bash"}
     try:
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", session_name, "-p", "-S", "-50"],
-            capture_output=True, text=True, timeout=10
+            ["tmux", "list-panes", "-t", f"={session_name}:", "-F", "#{pane_current_command}"],
+            capture_output=True, text=True, timeout=5
         )
-        output = result.stdout if result.returncode == 0 else ""
+        if result.returncode != 0:
+            return {"running": False, "error": f"Failed to query pane: {result.stderr.strip()}"}
+
+        pane_cmd = result.stdout.strip().split('\n')[0].strip()
     except Exception as e:
-        return {"running": False, "error": f"Failed to capture pane: {e}"}
+        return {"running": False, "error": f"Failed to query pane: {e}"}
 
-    # Check for common failure indicators
-    failure_indicators = [
-        "command not found",
-        "error:",
-        "Error:",
-        "ERROR",
-        "authentication failed",
-        "rate limit",
-        "Permission denied",
-        "No such file or directory",
-        "ModuleNotFoundError",
-        "ImportError",
-    ]
+    # If a non-shell process is running, the agent is active — done
+    if pane_cmd and pane_cmd not in shell_names:
+        return {"running": True, "process": pane_cmd}
 
-    detected_errors = []
-    for indicator in failure_indicators:
-        if indicator.lower() in output.lower():
-            detected_errors.append(indicator)
+    # Bare shell is showing — process hasn't started yet or exited.
+    # Check pane output for shell-level errors only.
+    try:
+        cap = subprocess.run(
+            ["tmux", "capture-pane", "-t", f"={session_name}:", "-p", "-S", "-20"],
+            capture_output=True, text=True, timeout=5
+        )
+        output = cap.stdout if cap.returncode == 0 else ""
+    except Exception:
+        output = ""
 
-    # Check if shell prompt is back (process exited quickly)
-    # Common prompts: $, %, >, or username@hostname patterns
-    lines = output.strip().split('\n')
-    last_lines = lines[-3:] if len(lines) >= 3 else lines
+    shell_errors = ["command not found", "No such file or directory", "Permission denied"]
+    for err in shell_errors:
+        if err.lower() in output.lower():
+            return {
+                "running": False,
+                "error": f"Shell error: {err}",
+                "output_sample": output[-500:] if len(output) > 500 else output,
+            }
 
-    prompt_patterns = ["$ ", "% ", "> ", "❯ "]
-    shell_returned = any(
-        any(p in line for p in prompt_patterns)
-        for line in last_lines
-    )
-
-    if detected_errors:
-        return {
-            "running": False,
-            "error": f"Detected errors: {', '.join(detected_errors)}",
-            "output_sample": output[-500:] if len(output) > 500 else output
-        }
-
-    if shell_returned and "claude" not in output.lower():
-        return {
-            "running": False,
-            "error": "Process appears to have exited (shell prompt returned)",
-            "output_sample": output[-500:] if len(output) > 500 else output
-        }
-
+    # Shell is showing but no error — process may still be initializing
     return {
-        "running": True,
-        "output_sample": output[-500:] if len(output) > 500 else output
+        "running": False,
+        "error": "Process not detected (shell prompt visible, process may not have started)",
+        "output_sample": output[-500:] if len(output) > 500 else output,
     }
 
 
@@ -377,7 +296,7 @@ def capture_session_logs(session_name: str, lines: int = 1000) -> str:
     """
     try:
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", session_name, "-p", "-S", f"-{lines}"],
+            ["tmux", "capture-pane", "-t", f"={session_name}:", "-p", "-S", f"-{lines}"],
             capture_output=True, text=True, timeout=10
         )
         return result.stdout if result.returncode == 0 else ""
@@ -521,7 +440,7 @@ def cleanup_orphaned_sessions(save_logs: bool = True) -> dict:
         
         # Kill the session
         subprocess.run(
-            ["tmux", "kill-session", "-t", session],
+            ["tmux", "kill-session", "-t", f"={session}"],
             capture_output=True, check=False
         )
         cleaned.append(session)
@@ -580,16 +499,16 @@ def spawn_agent(
     if not Path(prompt_file).exists():
         return {"success": False, "error": f"Prompt file not found: {prompt_file}"}
 
-    # Send command using file-based prompt (avoids escaping issues)
-    cmd = f'claude --dangerously-skip-permissions --permission-mode bypassPermissions -p "$(cat {prompt_file})"'
+    # Send command using pipe (avoids $(cat) subshell escaping issues)
+    cmd = f'unset CLAUDECODE && cat {shlex.quote(prompt_file)} | claude --dangerously-skip-permissions --permission-mode bypassPermissions -p'
     send_result = send_command(session_name, cmd)
 
     if not send_result.get("success"):
         return {"success": False, "error": "Failed to send command to session"}
 
-    # Verify the process is actually running (use new default of 10s with early exit)
+    # Verify the process is actually running
     if verify_startup:
-        verify_result = verify_process_running(session_name, wait_seconds=10, early_exit_on_failure=True)
+        verify_result = verify_process_running(session_name, wait_seconds=3)
         if not verify_result["running"]:
             return {
                 "success": False,
@@ -766,7 +685,7 @@ def monitor_with_timeout(
                 save_session_logs(session_name)
 
                 subprocess.run(
-                    ["tmux", "kill-session", "-t", session_name],
+                    ["tmux", "kill-session", "-t", f"={session_name}"],
                     capture_output=True, check=False
                 )
 
@@ -783,7 +702,7 @@ def monitor_with_timeout(
             save_session_logs(session_name)
 
             subprocess.run(
-                ["tmux", "kill-session", "-t", session_name],
+                ["tmux", "kill-session", "-t", f"={session_name}"],
                 capture_output=True, check=False
             )
 
@@ -804,6 +723,109 @@ def monitor_with_timeout(
             }
 
         time.sleep(check_interval)
+
+
+def preflight_check() -> dict:
+    """Run pre-flight checks to verify the orchestration environment is ready.
+
+    Checks:
+    - tmux in PATH
+    - claude in PATH (resolve absolute path)
+    - Inside a git repo
+    - pyyaml importable
+    - rich importable (optional, warning only)
+    - NODE_OPTIONS includes --max-old-space-size (warn if not)
+    - ulimit -n >= 4096 (warn if low)
+
+    Returns:
+        dict with pass/fail for each check and overall status
+    """
+    results = {}
+    all_pass = True
+
+    # 1. tmux in PATH
+    tmux_path = shutil.which("tmux")
+    if tmux_path:
+        results["tmux"] = {"pass": True, "detail": tmux_path}
+    else:
+        results["tmux"] = {"pass": False, "detail": "Not found. Install: brew install tmux"}
+        all_pass = False
+
+    # 2. claude in PATH
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        for candidate in [
+            os.path.expanduser("~/.local/bin/claude"),
+            "/usr/local/bin/claude",
+        ]:
+            if os.path.isfile(candidate):
+                claude_path = candidate
+                break
+    if claude_path:
+        results["claude"] = {"pass": True, "detail": claude_path}
+    else:
+        results["claude"] = {"pass": False, "detail": "Not found. Install: npm install -g @anthropic-ai/claude-code"}
+        all_pass = False
+
+    # 3. Inside a git repo
+    git_check = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True
+    )
+    if git_check.returncode == 0:
+        results["git_repo"] = {"pass": True, "detail": "Inside git repository"}
+    else:
+        results["git_repo"] = {"pass": False, "detail": "Not inside a git repository. Run: git init"}
+        all_pass = False
+
+    # 4. pyyaml importable
+    try:
+        import yaml  # noqa: F401
+        results["pyyaml"] = {"pass": True, "detail": "Importable"}
+    except ImportError:
+        results["pyyaml"] = {"pass": False, "detail": "Not installed. Run: pip install pyyaml"}
+        all_pass = False
+
+    # 5. rich importable (optional)
+    try:
+        import rich  # noqa: F401
+        results["rich"] = {"pass": True, "detail": "Importable"}
+    except ImportError:
+        results["rich"] = {"pass": True, "detail": "Not installed (optional). Run: pip install rich", "warn": True}
+
+    # 6. NODE_OPTIONS
+    node_opts = os.environ.get("NODE_OPTIONS", "")
+    if "--max-old-space-size" in node_opts:
+        results["node_options"] = {"pass": True, "detail": f"NODE_OPTIONS={node_opts}"}
+    else:
+        results["node_options"] = {
+            "pass": True,
+            "detail": "NODE_OPTIONS missing --max-old-space-size (will be set per-session)",
+            "warn": True,
+        }
+
+    # 7. ulimit -n
+    try:
+        ulimit_result = subprocess.run(
+            ["sh", "-c", "ulimit -n"],
+            capture_output=True, text=True, timeout=5
+        )
+        if ulimit_result.returncode == 0:
+            fd_limit = int(ulimit_result.stdout.strip())
+            if fd_limit >= 4096:
+                results["ulimit_n"] = {"pass": True, "detail": f"{fd_limit} file descriptors"}
+            else:
+                results["ulimit_n"] = {
+                    "pass": True,
+                    "detail": f"{fd_limit} (recommend >= 4096). Run: ulimit -n 4096",
+                    "warn": True,
+                }
+        else:
+            results["ulimit_n"] = {"pass": True, "detail": "Could not check", "warn": True}
+    except Exception:
+        results["ulimit_n"] = {"pass": True, "detail": "Could not check", "warn": True}
+
+    return {"checks": results, "all_pass": all_pass}
 
 
 def main():
@@ -829,8 +851,7 @@ def main():
     # verify-running command
     verify_parser = subparsers.add_parser("verify-running", help="Verify process is running in session")
     verify_parser.add_argument("session_name", help="Session name")
-    verify_parser.add_argument("--wait", type=int, default=10, help="Seconds to wait before checking (default 10)")
-    verify_parser.add_argument("--no-early-exit", action="store_true", help="Disable early exit on failure detection")
+    verify_parser.add_argument("--wait", type=int, default=3, help="Seconds to wait before checking (default 3)")
     
     # save-logs command
     logs_parser = subparsers.add_parser("save-logs", help="Save session logs to file")
@@ -869,6 +890,7 @@ def main():
     spawn_parser.add_argument("--prompt-file", required=True, help="Path to prompt file")
     spawn_parser.add_argument("--cwd", required=True, help="Working directory")
     spawn_parser.add_argument("--no-verify", action="store_true", help="Skip startup verification")
+    spawn_parser.add_argument("--fast", action="store_true", help="Skip startup verification (alias for --no-verify)")
 
     # spawn-agent command (generic - for verifier, integration-checker, reviewer, etc.)
     agent_parser = subparsers.add_parser("spawn-agent", help="Spawn any agent type with prompt file")
@@ -876,13 +898,18 @@ def main():
     agent_parser.add_argument("--prompt-file", required=True, help="Path to prompt file")
     agent_parser.add_argument("--cwd", required=True, help="Working directory")
     agent_parser.add_argument("--no-verify", action="store_true", help="Skip startup verification")
+    agent_parser.add_argument("--fast", action="store_true", help="Skip startup verification (alias for --no-verify)")
     
     # monitor command
     monitor_parser = subparsers.add_parser("monitor", help="Monitor task with timeout")
     monitor_parser.add_argument("task_id", help="Task ID")
     monitor_parser.add_argument("--signal-file", required=True, help="Signal file to wait for")
     monitor_parser.add_argument("--timeout", type=int, default=1800, help="Timeout in seconds")
-    
+
+    # preflight command
+    preflight_parser = subparsers.add_parser("preflight", help="Run pre-flight environment checks")
+    preflight_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
     args = parser.parse_args()
     
     if args.command == "create-session":
@@ -914,7 +941,6 @@ def main():
         result = verify_process_running(
             args.session_name,
             wait_seconds=args.wait,
-            early_exit_on_failure=not args.no_early_exit
         )
         print(json.dumps(result, indent=2))
         if not result["running"]:
@@ -975,7 +1001,7 @@ def main():
             args.task_id,
             args.prompt_file,
             args.cwd,
-            verify_startup=not args.no_verify
+            verify_startup=not (args.no_verify or args.fast)
         )
         if result["success"]:
             print(f"✓ Spawned worker: {result['session']}")
@@ -990,7 +1016,7 @@ def main():
             args.session_name,
             args.prompt_file,
             args.cwd,
-            verify_startup=not args.no_verify
+            verify_startup=not (args.no_verify or args.fast)
         )
         if result["success"]:
             print(f"✓ Spawned agent: {result['session']}")
@@ -1020,6 +1046,23 @@ def main():
 
         if not result.get("completed"):
             exit(1)  # Exit code 1 = failed/timeout
+
+    elif args.command == "preflight":
+        result = preflight_check()
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print("Pre-flight checks:")
+            for name, check in result["checks"].items():
+                status = "PASS" if check["pass"] else "FAIL"
+                warn = " (WARN)" if check.get("warn") else ""
+                print(f"  {status}{warn}  {name}: {check['detail']}")
+            print()
+            if result["all_pass"]:
+                print("All checks passed. Ready to orchestrate.")
+            else:
+                print("Some checks FAILED. Fix the issues above before orchestrating.")
+                exit(1)
 
 
 if __name__ == "__main__":
