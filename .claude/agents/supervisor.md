@@ -86,6 +86,9 @@ python3 ~/.claude/orchestrator_code/tmux.py cleanup-signals
 # Create directories
 mkdir -p .orchestrator/signals .orchestrator/logs .orchestrator/prompts
 
+# Initialize mailbox directories for all tasks
+python3 ~/.claude/orchestrator_code/mailbox.py init --tasks <task-a> <task-b> <task-c>
+
 # === DRY-RUN ENVIRONMENT CHECK ===
 # Verify dependencies can be resolved before spending time on workers
 if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
@@ -133,6 +136,12 @@ $CONTEXT
 
 ## Task Specification
 <copy from tasks.yaml>
+
+## Mailbox
+Check your inbox at startup and periodically:
+  python3 ~/.claude/orchestrator_code/mailbox.py check <task-id>
+Send messages to other workers when you change APIs or discover conventions:
+  python3 ~/.claude/orchestrator_code/mailbox.py send <recipient-task-id> "<message>" --from worker-<task-id>
 
 ## Instructions
 1. Implement the required changes in your worktree
@@ -457,8 +466,11 @@ uv add pandas>=2.0 scikit-learn>=1.0 matplotlib>=3.5
 # Recompute environment hash ONCE
 NEW_HASH=$(python3 ~/.claude/orchestrator_code/environment.py)
 
-# Restart ALL blocked workers
+# Notify blocked workers and restart them
 for task_id in $BLOCKED_TASKS; do
+    python3 ~/.claude/orchestrator_code/mailbox.py send $task_id \
+        "Dependencies installed. You can resume." \
+        --from supervisor --type dependency_installed
     tmux kill-session -t =worker-$task_id 2>/dev/null
     python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-$task_id \
         --prompt-file .orchestrator/prompts/worker-$task_id.md \

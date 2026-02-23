@@ -60,6 +60,17 @@ Record your environment hash in `.task-status.json`:
 }
 ```
 
+### 1b. Check Your Inbox
+
+Before starting work (and periodically during execution), check for messages from other workers or the Supervisor:
+
+```bash
+# Check for messages (returns empty if none)
+python3 ~/.claude/orchestrator_code/mailbox.py check <your-task-id>
+```
+
+If you receive an `api_change` message, read the referenced contract or file before proceeding. If you receive a `dependency_installed` message, you can resume work that was waiting on that dependency.
+
 ### 2. Read Contracts
 If your task depends on any contracts, read them first:
 ```bash
@@ -134,6 +145,13 @@ Example status:
   "last_activity": "Writing auth service implementation",
   "updated_at": "<ISO timestamp>"
 }
+```
+
+Also check your inbox periodically for messages from other workers:
+```bash
+python3 ~/.claude/orchestrator_code/mailbox.py peek <your-task-id>
+# If count > 0, read messages:
+python3 ~/.claude/orchestrator_code/mailbox.py check <your-task-id>
 ```
 
 ### 6. Complete
@@ -288,6 +306,33 @@ Add context when you make important discoveries:
 # Add context about your implementation
 python3 ~/.claude/orchestrator_code/context.py add "implementation.auth.token_format" "JWT with RS256" --agent worker-task-a
 ```
+
+## Communication with Other Workers
+
+Send messages when you make changes that could affect other tasks:
+
+```bash
+# Notify another worker about an API change
+python3 ~/.claude/orchestrator_code/mailbox.py send <other-task-id> \
+  "Changed login() return type to include refresh_token" \
+  --from worker-<your-task-id>
+
+# Broadcast to all workers (use sparingly)
+python3 ~/.claude/orchestrator_code/mailbox.py broadcast \
+  "Database schema uses UUID primary keys, not auto-increment" \
+  --from worker-<your-task-id>
+```
+
+**When to send messages:**
+- You change an API signature or return type
+- You discover a project convention that others should follow
+- You find a bug in shared code
+- Your implementation affects files that other tasks read
+
+**When to check inbox:**
+- At startup (Step 1b)
+- Before implementing against a contract (the contract may have changed)
+- After completing a major step (every ~10 minutes)
 
 ## Tips for Success
 
