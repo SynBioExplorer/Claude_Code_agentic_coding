@@ -99,6 +99,7 @@ Standalone Python scripts in `~/.claude/orchestrator_code/`:
 | `tasks.py` | Check task readiness, blocked tasks | `python3 ~/.claude/orchestrator_code/tasks.py blocked` |
 | `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
 | `context.py` | Shared context store, prompt injection | `python3 ~/.claude/orchestrator_code/context.py get-for-task task-a` |
+| `mailbox.py` | Inter-worker messaging and broadcasts | `python3 ~/.claude/orchestrator_code/mailbox.py send task-b "API changed" --from worker-task-a` |
 | `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
 | `workers_view.py` | Live worker output panels | `python3 ~/.claude/orchestrator_code/workers_view.py` |
 | `monitoring.py` | Open/manage monitoring windows | `python3 ~/.claude/orchestrator_code/monitoring.py open` |
@@ -360,6 +361,38 @@ This is better than pull-based because:
 - Supervisor has global view of what's relevant
 - No risk of workers missing important context
 
+### Inter-Worker Mailbox
+
+Workers are isolated in separate git worktrees, but sometimes one worker's discoveries need to reach another mid-execution — an API signature change, a naming convention, or a new dependency installed by the Supervisor.
+
+The mailbox system provides push-based messaging between workers:
+
+- **Targeted messages**: Worker A sends directly to Worker B's inbox
+- **Broadcasts**: Supervisor or any worker sends to all workers at once
+
+**Use cases:**
+- Worker changes a function signature that another worker will consume via a contract
+- Supervisor installs a requested dependency and notifies all workers
+- Worker discovers a naming convention that others should follow
+
+**CLI examples:**
+
+```bash
+# Send a message to a specific worker
+python3 ~/.claude/orchestrator_code/mailbox.py send task-b "Changed login() return type" --from worker-task-a
+
+# Broadcast to all workers
+python3 ~/.claude/orchestrator_code/mailbox.py broadcast "Using UUID primary keys" --from supervisor
+
+# Check inbox (marks messages as read)
+python3 ~/.claude/orchestrator_code/mailbox.py check task-b
+
+# Peek at inbox (unread count only, no side effects)
+python3 ~/.claude/orchestrator_code/mailbox.py peek task-b
+```
+
+**Relationship to context injection:** Context injection (`context.py`) provides the initial state at worker spawn time — persistent project knowledge pulled into the prompt. The mailbox provides runtime updates during execution — ephemeral notifications pushed to inboxes as events happen.
+
 ### Dependency Resolution (RFC Model)
 
 When workers discover missing dependencies, the Supervisor mediates:
@@ -417,6 +450,14 @@ your-project/
 ├── contracts/                    # Interface Protocol stubs
 │   └── auth_interface.py
 ├── .orchestration-state.json     # Execution state
+├── .orchestrator/
+│   ├── signals/                  # Worker signal files
+│   ├── logs/                     # Worker logs
+│   ├── prompts/                  # Generated worker prompts
+│   └── mailbox/                  # Inter-worker message inboxes
+│       ├── task-auth-service/
+│       ├── task-auth-routes/
+│       └── broadcast/
 └── .worktrees/                   # Isolated worktrees (temporary)
     ├── task-auth-service/
     │   └── .task-status.json

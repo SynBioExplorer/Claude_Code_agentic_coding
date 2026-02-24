@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 820">
   <defs>
     <!-- Gradients -->
     <linearGradient id="plannerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -37,19 +37,19 @@
   </defs>
 
   <!-- Background -->
-  <rect width="1000" height="800" fill="#f8fafc"/>
+  <rect width="1000" height="820" fill="#f8fafc"/>
 
   <!-- Title -->
   <text x="500" y="35" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="700" fill="#1e293b">Claude Code Multi-Agent Orchestration</text>
   <text x="500" y="55" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#64748b">Parallel Task Execution with Git Worktrees</text>
 
   <!-- ==================== ORCHESTRATOR UTILITIES (Central Hub) ==================== -->
-  <rect x="30" y="280" width="140" height="240" rx="10" fill="url(#utilGrad)" filter="url(#shadow)"/>
+  <rect x="30" y="280" width="140" height="260" rx="10" fill="url(#utilGrad)" filter="url(#shadow)"/>
   <text x="100" y="305" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="white">Orchestrator</text>
   <text x="100" y="318" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="white">Utilities</text>
   <text x="100" y="335" text-anchor="middle" font-family="monospace" font-size="7" fill="#94a3b8">~/.claude/orchestrator_code/</text>
 
-  <rect x="40" y="345" width="120" height="165" rx="4" fill="rgba(255,255,255,0.08)"/>
+  <rect x="40" y="345" width="120" height="180" rx="4" fill="rgba(255,255,255,0.08)"/>
   <text x="50" y="362" font-family="monospace" font-size="8" fill="#a5b4fc">state.py</text>
   <text x="50" y="377" font-family="monospace" font-size="8" fill="#94a3b8">monitoring.py</text>
   <text x="50" y="392" font-family="monospace" font-size="8" fill="#94a3b8">dashboard.py</text>
@@ -60,6 +60,7 @@
   <text x="50" y="467" font-family="monospace" font-size="8" fill="#94a3b8">environment.py</text>
   <text x="50" y="482" font-family="monospace" font-size="8" fill="#94a3b8">tasks.py</text>
   <text x="50" y="497" font-family="monospace" font-size="8" fill="#94a3b8">verify.py</text>
+  <text x="50" y="512" font-family="monospace" font-size="8" fill="#a5b4fc">mailbox.py</text>
 
   <!-- Connection lines from Utilities to Agents -->
   <!-- To Planner -->
@@ -106,6 +107,10 @@
   <path d="M 500 355 L 500 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
   <path d="M 610 355 L 610 380 L 720 380 L 720 420" stroke="#555" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
 
+  <!-- Supervisor → Workers mailbox broadcast (amber dashed, offset right of center arrow) -->
+  <line x1="545" y1="355" x2="545" y2="420" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="568" y="393" font-family="system-ui, -apple-system, sans-serif" font-size="7" font-weight="600" fill="#d97706">broadcast</text>
+
   <!-- Worker Boxes -->
   <!-- Worker 1 -->
   <rect x="195" y="425" width="170" height="95" rx="10" fill="url(#workerGrad)" filter="url(#shadow)"/>
@@ -130,6 +135,13 @@
   <rect x="650" y="478" width="140" height="32" rx="4" fill="rgba(0,0,0,0.15)"/>
   <text x="720" y="493" text-anchor="middle" font-family="monospace" font-size="9" fill="white">.worktrees/task-c/</text>
   <text x="720" y="505" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="rgba(255,255,255,0.8)">files_write: [tests.py]</text>
+
+  <!-- Inter-worker mailbox communication (segment between Worker 1 ↔ Worker 2) -->
+  <line x1="365" y1="472" x2="415" y2="472" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="390" y="466" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="7" font-weight="600" fill="#d97706">mailbox</text>
+  <!-- Inter-worker mailbox communication (segment between Worker 2 ↔ Worker 3) -->
+  <line x1="585" y1="472" x2="635" y2="472" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="610" y="466" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="7" font-weight="600" fill="#d97706">mailbox</text>
 
   <!-- Parallel execution indicator -->
   <rect x="370" y="540" width="260" height="22" rx="11" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1"/>
@@ -187,14 +199,15 @@
   <!-- ==================== SIDE PANELS ==================== -->
 
   <!-- Generated Artifacts Panel (moved to bottom left) -->
-  <rect x="30" y="545" width="160" height="130" rx="10" fill="#334155" filter="url(#shadow)"/>
+  <rect x="30" y="545" width="160" height="147" rx="10" fill="#334155" filter="url(#shadow)"/>
   <text x="110" y="570" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="white">Generated Artifacts</text>
 
-  <rect x="42" y="582" width="136" height="82" rx="4" fill="rgba(255,255,255,0.08)"/>
+  <rect x="42" y="582" width="136" height="99" rx="4" fill="rgba(255,255,255,0.08)"/>
   <text x="52" y="600" font-family="monospace" font-size="9" fill="#94a3b8">📄 tasks.yaml</text>
   <text x="52" y="617" font-family="monospace" font-size="9" fill="#94a3b8">📁 contracts/</text>
   <text x="52" y="634" font-family="monospace" font-size="9" fill="#94a3b8">📁 .worktrees/</text>
   <text x="52" y="651" font-family="monospace" font-size="9" fill="#94a3b8">📄 .orchestration-state.json</text>
+  <text x="52" y="668" font-family="monospace" font-size="9" fill="#94a3b8">📬 .orchestrator/mailbox/</text>
 
   <!-- Interface Contracts Panel -->
   <rect x="820" y="145" width="160" height="120" rx="10" fill="#1e293b" filter="url(#shadow)"/>
@@ -207,7 +220,7 @@
   <text x="840" y="242" font-family="monospace" font-size="7" fill="#64748b"># Version: abc1234</text>
 
   <!-- Legend -->
-  <rect x="820" y="540" width="160" height="145" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="820" y="540" width="160" height="165" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
   <text x="900" y="560" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#475569">Model Legend</text>
 
   <circle cx="840" cy="580" r="6" fill="url(#plannerGrad)"/>
@@ -223,10 +236,13 @@
   <text x="855" y="644" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#475569">sonnet (integration)</text>
 
   <line x1="835" y1="658" x2="965" y2="658" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="900" y="672" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">Dashed lines show</text>
-  <text x="900" y="683" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
+  <line x1="835" y1="672" x2="855" y2="672" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="862" y="676" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#d97706">worker mailbox</text>
+
+  <text x="900" y="696" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">Dashed grey lines show</text>
+  <text x="900" y="706" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="8" fill="#64748b">utility script usage</text>
 
   <!-- Footer -->
-  <text x="500" y="775" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Verifier (+ type check) → staging → Incremental test → Integration-Checker → main → Review</text>
-  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Contract type verification required • Max 3 iterations then Escalation Protocol (user decides: fix/re-plan/abort)</text>
+  <text x="500" y="790" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">Verifier (+ type check) → staging → Incremental test → Integration-Checker → main → Review</text>
+  <text x="500" y="805" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" fill="#64748b">Contract type verification required • Max 3 iterations then Escalation Protocol (user decides: fix/re-plan/abort)</text>
 </svg>

@@ -520,6 +520,72 @@ def compute_risk_score(plan: ExecutionPlan) -> RiskScore:
 | 26-50 | Human review recommended |
 | 51+ | Human review required |
 
+### 9. Inter-Agent Mailbox Communication
+
+**Problem:** Workers are physically isolated in separate git worktrees. When one worker discovers an API change, naming convention, or important pattern, there is no way to propagate that knowledge to other workers in real time. Conflicts are only caught post-hoc during verification—wasting work and requiring rework.
+
+**Solution:** A file-based mailbox system with per-task inboxes and a broadcast directory, enabling push-based notifications between workers during execution.
+
+**Directory layout:**
+
+```
+.orchestrator/mailbox/
+├── worker-task-a/               # Inbox for task-a
+│   ├── msg-<uuid>.json          # Unread message
+│   └── msg-<uuid>.read.json     # Read (processed) message
+├── worker-task-b/               # Inbox for task-b
+└── broadcast/                   # Messages for all workers
+    └── msg-<uuid>.json
+```
+
+**Message format:**
+
+```json
+{
+  "id": "a1b2c3d4",
+  "from": "worker-task-a",
+  "to": "worker-task-b",
+  "type": "api_change",
+  "body": "Changed login() return type from dict to LoginResponse",
+  "timestamp": "2025-01-27T10:30:00Z",
+  "data": { "file": "src/services/auth.py", "method": "login" }
+}
+```
+
+**Message types:**
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `info` | General advisory | "Using snake_case for all API fields" |
+| `api_change` | Interface/signature change | "login() now returns LoginResponse" |
+| `dependency_installed` | New package available | "pandas>=2.0 installed by Supervisor" |
+| `warning` | Potential issue | "auth.py has circular import risk" |
+| `blocking` | Urgent: recipient should check before proceeding | "Contract AuthProtocol v2 published" |
+
+**Atomic writes:** Messages use write-tmp-then-rename (same pattern as signal files in `tmux.py`), preventing partial reads without any locking mechanism.
+
+**Read marking:** Recipients rename `.json` → `.read.json` atomically. No file locking is needed—each inbox has exactly one consumer (its worker).
+
+**Worker protocol:**
+1. **At startup** — Check inbox for any pre-execution messages from Supervisor
+2. **After major steps** — Check inbox between implementation phases (e.g., after writing core logic, before writing tests)
+3. **Before contract implementation** — Check for `api_change` or `blocking` messages that might affect the contract interface being consumed
+
+**Supervisor integration:**
+- **Stage 0:** Supervisor calls `mailbox.py init --tasks <task-ids>` to create all inbox directories
+- **Dependency installs:** Supervisor broadcasts `dependency_installed` messages after resolving worker dependency requests
+- **Coordination:** Supervisor can send targeted messages to specific workers about relevant changes
+
+**Contrast with context.py:**
+
+| Aspect | `context.py` | `mailbox.py` |
+|--------|-------------|-------------|
+| Purpose | Persistent project knowledge | Ephemeral runtime notifications |
+| Delivery | Pull-based (injected into prompt at spawn) | Push-based (written to inbox during execution) |
+| Lifetime | Survives across orchestration runs | Scoped to current execution |
+| Content | Architecture patterns, coding conventions | API changes, dependency updates, warnings |
+| Producer | Planner-Architect, Supervisor | Workers, Supervisor |
+
 ---
 
 ## Agent Specifications
@@ -880,7 +946,12 @@ def compute_risk_score(plan: ExecutionPlan) -> RiskScore:
 
 **Role:** Orchestrate execution, manage worktrees and tmux sessions, monitor progress, handle merges.
 
-*(Unchanged from ARCHITECTURE_6.md)*
+**Mailbox responsibilities:**
+- **Stage 0:** Initialize mailboxes for all tasks (`mailbox.py init --tasks <task-ids>`)
+- **Dependency installs:** Broadcast `dependency_installed` messages after resolving worker requests
+- **Coordination:** Send targeted messages to specific workers when relevant state changes
+
+*(Remainder unchanged from ARCHITECTURE_6.md)*
 
 ---
 
@@ -896,6 +967,7 @@ def compute_risk_score(plan: ExecutionPlan) -> RiskScore:
 - **MUST** record `environment.hash` at startup
 - **MUST NOT** modify files outside assignment
 - **MUST** use structured patch intents for hot files (when adapter available)
+- **MUST** check mailbox at startup, after major steps, and before contract implementation
 - **MUST NOT** modify lockfiles, generated files, or vendor directories
 
 ---
@@ -1599,6 +1671,11 @@ contracts:
   max_renegotiations: 2
   track_renegotiations: true
 
+# Inter-worker mailbox
+mailbox:
+  enabled: true
+  message_types: ["info", "api_change", "dependency_installed", "warning", "blocking"]
+
 # Quality gates
 quality:
   verifier_checks:
@@ -1738,6 +1815,7 @@ This architecture enables:
 13. **Ecosystem-Aware Dependencies** — Canonical lockfiles per ecosystem
 14. **Human Oversight** — Approval gates and escalation paths
 15. **Security Scanning** — Post-merge security checks via integration-checker
+16. **Inter-Agent Communication** — Mailbox system enables real-time worker-to-worker coordination
 
 The system transforms complex multi-file features into coordinated parallel execution with deterministic, conflict-free merging.
 
