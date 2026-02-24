@@ -124,8 +124,9 @@ def _get_unread_messages(inbox_dir: Path) -> list[dict]:
             continue
         try:
             messages.append(json.loads(f.read_text()))
-        except (json.JSONDecodeError, OSError):
-            # Skip corrupt/partial files
+        except (json.JSONDecodeError, OSError) as e:
+            # Log dropped messages to stderr for debugging
+            print(f"Warning: Skipping corrupt message file {f.name}: {e}", file=__import__('sys').stderr)
             continue
 
     # Sort by timestamp
@@ -199,10 +200,36 @@ def broadcast_message(
     return [message["id"]]
 
 
+def _get_seen_broadcasts(task_id: str, project_dir: Optional[str] = None) -> set[str]:
+    """Load the set of broadcast message IDs already seen by this worker."""
+    seen_file = _get_mailbox_root(project_dir) / BROADCAST_DIR / f".seen-by-{task_id}"
+    if not seen_file.exists():
+        return set()
+    try:
+        return set(seen_file.read_text().strip().split("\n"))
+    except (OSError, ValueError):
+        return set()
+
+
+def _mark_broadcasts_seen(task_id: str, msg_ids: list[str], project_dir: Optional[str] = None) -> None:
+    """Record broadcast message IDs as seen by this worker."""
+    seen_file = _get_mailbox_root(project_dir) / BROADCAST_DIR / f".seen-by-{task_id}"
+    existing = _get_seen_broadcasts(task_id, project_dir)
+    existing.update(msg_ids)
+    try:
+        seen_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = seen_file.with_suffix(".tmp")
+        tmp_file.write_text("\n".join(sorted(existing)))
+        tmp_file.rename(seen_file)
+    except OSError:
+        pass
+
+
 def check_inbox(task_id: str, project_dir: Optional[str] = None) -> list[dict]:
     """Check inbox for unread messages. Returns messages and marks them as read.
 
     Checks both the task's personal inbox and the broadcast directory.
+    Broadcast deduplication uses per-worker .seen-by-{task_id} files.
     """
     all_messages = []
 
@@ -211,12 +238,15 @@ def check_inbox(task_id: str, project_dir: Optional[str] = None) -> list[dict]:
     personal = _get_unread_messages(inbox)
     all_messages.extend(personal)
 
-    # Check broadcast directory
+    # Check broadcast directory (with per-worker deduplication)
     broadcast_dir = _get_broadcast_dir(project_dir)
     broadcasts = _get_unread_messages(broadcast_dir)
     # Filter out broadcasts from self
     broadcasts = [m for m in broadcasts if m.get("from") != f"worker-{task_id}"]
-    all_messages.extend(broadcasts)
+    # Filter out already-seen broadcasts
+    seen_ids = _get_seen_broadcasts(task_id, project_dir)
+    new_broadcasts = [m for m in broadcasts if m.get("id") not in seen_ids]
+    all_messages.extend(new_broadcasts)
 
     # Sort all by timestamp
     all_messages.sort(key=lambda m: m.get("timestamp", ""))
@@ -225,10 +255,11 @@ def check_inbox(task_id: str, project_dir: Optional[str] = None) -> list[dict]:
     for msg in personal:
         _mark_as_read(inbox, msg["id"])
 
-    # Note: broadcast messages are NOT marked as read per-recipient.
-    # They remain readable by all workers until cleanup.
-    # This is intentional — broadcasts are "read once per worker" via
-    # the worker tracking which broadcasts it has already seen.
+    # Track which broadcasts this worker has now seen
+    if new_broadcasts:
+        _mark_broadcasts_seen(
+            task_id, [m["id"] for m in new_broadcasts], project_dir
+        )
 
     if all_messages:
         print(f"=== Inbox for {task_id}: {len(all_messages)} message(s) ===\n")
@@ -253,10 +284,46 @@ def peek_inbox(task_id: str, project_dir: Optional[str] = None) -> int:
     broadcast_dir = _get_broadcast_dir(project_dir)
     broadcasts = _get_unread_messages(broadcast_dir)
     broadcasts = [m for m in broadcasts if m.get("from") != f"worker-{task_id}"]
+    # Exclude already-seen broadcasts
+    seen_ids = _get_seen_broadcasts(task_id, project_dir)
+    broadcasts = [m for m in broadcasts if m.get("id") not in seen_ids]
 
     count = len(personal) + len(broadcasts)
     print(count)
     return count
+
+
+def cleanup_mailbox(project_dir: Optional[str] = None) -> dict:
+    """Clean up all mailbox state: read messages, .seen-by files, broadcast dir.
+
+    Call at end of orchestration to prevent stale data from affecting next run.
+    """
+    root = _get_mailbox_root(project_dir)
+    removed = 0
+
+    if not root.exists():
+        return {"removed": 0}
+
+    # Clean .read.json files from all inboxes
+    for read_file in root.glob("*/msg-*.read.json"):
+        try:
+            read_file.unlink()
+            removed += 1
+        except OSError:
+            pass
+
+    # Clean .seen-by-* files from broadcast dir
+    broadcast_dir = _get_broadcast_dir(project_dir)
+    if broadcast_dir.exists():
+        for seen_file in broadcast_dir.glob(".seen-by-*"):
+            try:
+                seen_file.unlink()
+                removed += 1
+            except OSError:
+                pass
+
+    print(f"Cleaned up {removed} mailbox files")
+    return {"removed": removed}
 
 
 # === CLI ===
@@ -349,6 +416,9 @@ def main():
             sys.exit(1)
         task_id = sys.argv[2]
         peek_inbox(task_id)
+
+    elif command == "cleanup":
+        cleanup_mailbox()
 
     else:
         print(f"Unknown command: {command}")

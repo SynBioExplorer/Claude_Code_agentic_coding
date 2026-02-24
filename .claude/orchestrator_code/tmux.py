@@ -28,7 +28,7 @@ from pathlib import Path
 # Constants for atomic operations
 SIGNAL_SUFFIX_TMP = ".tmp"
 HEARTBEAT_INTERVAL = 30  # seconds
-HEARTBEAT_STALE_THRESHOLD = 90  # seconds - consider worker hung if no heartbeat for this long
+HEARTBEAT_STALE_THRESHOLD = 60  # seconds - consider worker hung if no heartbeat for this long
 
 
 def create_signal_file(signal_file: str, content: str = "") -> bool:
@@ -157,17 +157,32 @@ def create_worker_session(
         )
         time.sleep(init_timeout)  # 1s settle (was 5s)
 
-        # Kill any old session with the target name and rename ours
+        # Kill any old session with the target name and rename ours (with retry)
         subprocess.run(
             ["tmux", "kill-session", "-t", f"={session_name}"],
             capture_output=True, check=False
         )
 
-        # Rename our uniquely-named session to the requested name
-        subprocess.run(
-            ["tmux", "rename-session", "-t", f"={unique_session}", session_name],
-            capture_output=True, check=False
-        )
+        # Rename with retry-with-backoff to handle race conditions
+        rename_success = False
+        for attempt in range(3):
+            rename_result = subprocess.run(
+                ["tmux", "rename-session", "-t", f"={unique_session}", session_name],
+                capture_output=True, text=True, check=False
+            )
+            if rename_result.returncode == 0:
+                rename_success = True
+                break
+            # Another session may have grabbed the name; kill it and retry
+            time.sleep(0.2 * (attempt + 1))
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={session_name}"],
+                capture_output=True, check=False
+            )
+
+        if not rename_success:
+            # Fall back: use the unique session name directly
+            return {"success": True, "session": unique_session}
 
         return {"success": True, "session": session_name}
 
@@ -678,7 +693,7 @@ def monitor_with_timeout(
             }
 
         # Check heartbeat (faster detection of hung workers)
-        if elapsed > 60:  # Only check heartbeat after 1 minute (give worker time to start)
+        if elapsed > 30:  # Only check heartbeat after 30s (give worker time to start)
             heartbeat = check_heartbeat(task_id, stale_threshold=heartbeat_timeout)
             if heartbeat["has_heartbeat"] and heartbeat["stale"]:
                 # Worker has stopped sending heartbeats - likely hung

@@ -133,7 +133,7 @@ def save_context(context: dict, project_dir: Optional[str] = None) -> None:
                 pass
 
 
-def load_and_lock_context(project_dir: Optional[str] = None) -> tuple[dict, Any]:
+def load_and_lock_context(project_dir: Optional[str] = None, timeout: float = 10.0) -> tuple[dict, Any]:
     """Load context with exclusive lock held for read-modify-write operations.
 
     IMPORTANT: The returned lock file handle MUST be closed by calling
@@ -144,10 +144,18 @@ def load_and_lock_context(project_dir: Optional[str] = None) -> tuple[dict, Any]
     - Agent B: load → modify → save (overwrites)
     - Agent A: save (A's changes lost, B's changes lost)
 
+    Args:
+        project_dir: Optional project directory
+        timeout: Max seconds to wait for lock (default 10s)
+
     Returns:
         tuple of (context_dict, lock_file_handle)
+
+    Raises:
+        TimeoutError: If lock cannot be acquired within timeout
     """
     import fcntl
+    import time
 
     context_path = get_context_path(project_dir)
     lock_path = context_path.with_suffix('.lock')
@@ -155,9 +163,21 @@ def load_and_lock_context(project_dir: Optional[str] = None) -> tuple[dict, Any]
     # Ensure lock file exists
     lock_path.touch()
 
-    # Open and acquire exclusive lock
+    # Open and acquire exclusive lock with timeout (non-blocking retry)
     lock_file = open(lock_path, 'r+')
-    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except (IOError, OSError):
+            if time.time() > deadline:
+                lock_file.close()
+                raise TimeoutError(
+                    f"Could not acquire context lock within {timeout}s. "
+                    f"Another agent may be hung while holding {lock_path}"
+                )
+            time.sleep(0.05)
 
     # Now load the context while holding the lock
     if context_path.exists():

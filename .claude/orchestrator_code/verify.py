@@ -10,7 +10,9 @@ Usage:
     python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml
 """
 
+import fnmatch
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -53,8 +55,17 @@ def get_task_spec(tasks_file: str, task_id: str) -> dict | None:
     return None
 
 
+class DiffError(Exception):
+    """Raised when git diff cannot determine modified files."""
+    pass
+
+
 def get_modified_files(worktree_path: str) -> list:
-    """Get list of files modified in worktree."""
+    """Get list of files modified in worktree.
+
+    Raises DiffError if neither diff strategy succeeds, to prevent
+    silently passing boundary checks with an empty file list.
+    """
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", "HEAD~1..HEAD"],
@@ -69,7 +80,14 @@ def get_modified_files(worktree_path: str) -> list:
             cwd=worktree_path,
             capture_output=True, text=True
         )
-        return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
+        if result.returncode == 0:
+            return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
+        # Both diff strategies failed — do NOT return empty list
+        raise DiffError(
+            f"Cannot determine modified files in {worktree_path}: "
+            f"both HEAD~1..HEAD and main...HEAD failed. "
+            f"stderr: {result.stderr.strip()}"
+        )
 
 
 def validate_boundaries(task_id: str, tasks_file: str = "tasks.yaml") -> dict:
@@ -82,7 +100,10 @@ def validate_boundaries(task_id: str, tasks_file: str = "tasks.yaml") -> dict:
     if not Path(worktree_path).exists():
         return {"valid": False, "error": f"Worktree not found: {worktree_path}"}
 
-    modified = get_modified_files(worktree_path)
+    try:
+        modified = get_modified_files(worktree_path)
+    except DiffError as e:
+        return {"valid": False, "error": str(e)}
     allowed = set(task.get("files_write", []))
 
     # Check for unauthorized modifications
@@ -90,17 +111,14 @@ def validate_boundaries(task_id: str, tasks_file: str = "tasks.yaml") -> dict:
     forbidden = []
 
     for f in modified:
-        # Check forbidden patterns
+        # Check forbidden patterns using fnmatch for proper glob support
         for pattern in FORBIDDEN_PATTERNS:
             if pattern.endswith("/"):
+                # Directory pattern: check if file is under this directory
                 if f.startswith(pattern) or f"/{pattern}" in f:
                     forbidden.append(f)
                     break
-            elif pattern.startswith("*"):
-                if f.endswith(pattern[1:]):
-                    forbidden.append(f)
-                    break
-            elif pattern in f:
+            elif fnmatch.fnmatch(f, pattern) or fnmatch.fnmatch(f.split("/")[-1], pattern):
                 forbidden.append(f)
                 break
         else:
@@ -175,9 +193,15 @@ def run_verification_commands(
         vtype = verification.get("type", "check")
         required = verification.get("required", True)
 
-        # Resolve placeholders
-        modified_files = get_modified_files(worktree_path)
-        command = command.replace("{modified_files}", " ".join(modified_files))
+        # Resolve placeholders (shell-escape each filename to prevent injection)
+        try:
+            modified_files = get_modified_files(worktree_path)
+        except DiffError as e:
+            return {"success": False, "error": f"Cannot resolve modified files: {e}"}
+        command = command.replace(
+            "{modified_files}",
+            " ".join(shlex.quote(f) for f in modified_files)
+        )
 
         # Run command with configurable timeout (default 5 minutes, allow up to 10)
         timeout_seconds = verification.get("timeout", 300)

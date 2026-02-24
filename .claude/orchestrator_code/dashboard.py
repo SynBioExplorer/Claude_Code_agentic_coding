@@ -64,6 +64,27 @@ def get_last_activity(task_id: str) -> str:
     return ""
 
 
+def get_task_duration(task_status: dict) -> str:
+    """Get task duration from started_at to completed_at or now."""
+    started = task_status.get("started_at")
+    if not started:
+        return ""
+    try:
+        start_time = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        completed = task_status.get("completed_at")
+        if completed:
+            end_time = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+        else:
+            end_time = datetime.now(start_time.tzinfo)
+        elapsed = end_time - start_time
+        minutes, seconds = divmod(int(elapsed.total_seconds()), 60)
+        if minutes > 0:
+            return f"{minutes}m{seconds}s"
+        return f"{seconds}s"
+    except (ValueError, TypeError):
+        return ""
+
+
 def safe_read_json(filepath: Path, max_retries: int = 3) -> dict:
     """Safely read JSON file with retry on parse failure.
 
@@ -136,6 +157,8 @@ def get_progress_text(task_status: dict) -> str:
         return "Waiting..."
 
     progress = task_status.get("progress", {})
+    if not isinstance(progress, dict):
+        progress = {}
     status = task_status.get("status", "pending")
 
     if status == "failed":
@@ -338,7 +361,12 @@ def build_simple_dashboard() -> Table:
                 if last_activity:
                     progress = last_activity[:40]
 
-            table.add_row(task_id[:16], status_text, agent, progress[:40])
+            # Append duration if available
+            duration = get_task_duration(task_status)
+            if duration:
+                progress = f"{progress} ({duration})"
+
+            table.add_row(task_id[:16], status_text, agent, progress[:45])
 
     table.caption = (
         f"[dim]Request:[/dim] {request}\n"

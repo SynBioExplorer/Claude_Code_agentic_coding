@@ -17,6 +17,7 @@ import sys
 import os
 import fcntl
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -136,7 +137,7 @@ def compute_env_hash() -> str:
     for lf in lockfiles:
         p = Path(lf)
         if p.exists():
-            return hashlib.sha256(p.read_bytes()).hexdigest()[:8]
+            return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
     return "no-lock"
 
 
@@ -198,21 +199,46 @@ def save_state(state: dict):
 
 
 def update_task(task_id: str, new_status: str, error: str = None) -> dict:
-    """Update a task's status."""
-    state = load_state()
-    if state is None:
-        raise ValueError("No orchestration state found")
+    """Update a task's status with file locking to prevent lost updates.
 
-    if task_id not in state["tasks"]:
-        raise ValueError(f"Task {task_id} not found")
+    Uses fcntl.flock to ensure read-modify-write is atomic across
+    concurrent Supervisor calls.
+    """
+    state_path = Path(STATE_FILE)
+    lock_path = state_path.with_suffix('.lock')
+    lock_path.touch(exist_ok=True)
 
-    state["tasks"][task_id]["status"] = new_status
-    state["tasks"][task_id]["updated_at"] = datetime.now().isoformat()
-    if error:
-        state["tasks"][task_id]["error"] = error
+    lock_file = open(lock_path, 'r+')
+    try:
+        # Acquire exclusive lock with timeout via non-blocking retry
+        deadline = time.time() + 10  # 10 second timeout
+        while True:
+            try:
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (IOError, OSError):
+                if time.time() > deadline:
+                    raise TimeoutError("Could not acquire state lock within 10 seconds")
+                time.sleep(0.05)
 
-    save_state(state)
-    return state
+        # Read-modify-write while holding lock
+        state = load_state()
+        if state is None:
+            raise ValueError("No orchestration state found")
+
+        if task_id not in state["tasks"]:
+            raise ValueError(f"Task {task_id} not found")
+
+        state["tasks"][task_id]["status"] = new_status
+        state["tasks"][task_id]["updated_at"] = datetime.now().isoformat()
+        if error:
+            state["tasks"][task_id]["error"] = error
+
+        save_state(state)
+        return state
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
 
 
 def get_effective_status(task_id: str, task_info: dict) -> str:

@@ -63,7 +63,7 @@ def compute_env_hash(base_path: Path = None) -> tuple[str, list[str]]:
         combined_hasher.update(lockfile.encode('utf-8'))
         combined_hasher.update(path.read_bytes())
 
-    return combined_hasher.hexdigest()[:8], found_lockfiles
+    return combined_hasher.hexdigest()[:16], found_lockfiles
 
 
 def compute_env_hash_legacy(base_path: Path = None) -> tuple[str, str | None]:
@@ -80,7 +80,7 @@ def compute_env_hash_legacy(base_path: Path = None) -> tuple[str, str | None]:
         path = base_path / lockfile
         if path.exists():
             content = path.read_bytes()
-            return hashlib.sha256(content).hexdigest()[:8], lockfile
+            return hashlib.sha256(content).hexdigest()[:16], lockfile
 
     return "no-lock", None
 

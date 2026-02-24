@@ -57,7 +57,13 @@ def open_terminal_with_command(command: str, app: str = None):
     # Escape for AppleScript double-quoted strings:
     # 1. Backslashes must be doubled: \ -> \\
     # 2. Double quotes must be escaped: " -> \"
-    escaped_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
+    # 3. Control characters (newlines, tabs) must be stripped
+    escaped_cmd = (command
+                   .replace("\\", "\\\\")
+                   .replace('"', '\\"')
+                   .replace("\n", " ")
+                   .replace("\r", "")
+                   .replace("\t", " "))
 
     if app == "iTerm":
         script = f'''
@@ -116,8 +122,8 @@ def open_monitoring_windows(project_dir: str = None):
 
     # Workers window - use live capture view instead of tmux attach
     # (tmux attach crashes with conda's tmux on macOS)
-    # This uses watch + capture-pane to show live output without attaching
-    workers_cmd = f"cd {quoted_dir} && source /opt/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || true; python3 ~/.claude/orchestrator_code/workers_view.py"
+    # Conda is always at /opt/miniconda3 per conda skill configuration
+    workers_cmd = f"cd {quoted_dir} && eval \"$(/opt/miniconda3/bin/conda shell.bash hook)\" 2>/dev/null || true; python3 ~/.claude/orchestrator_code/workers_view.py"
     if open_terminal_with_command(workers_cmd, app):
         print("  Opened Workers window (live capture view)")
     else:

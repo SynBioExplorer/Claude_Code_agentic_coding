@@ -94,10 +94,12 @@ class WorktreeManager:
             cwd=self.repo_root,
         )
 
-        # Also delete the branch if it exists
+        # Also delete the branch if it exists (use -d for safe delete,
+        # -D only when force-deleting the worktree)
         branch_name = f"task/{task_id}"
+        flag = "-D" if force else "-d"
         run_command(
-            f"git branch -d {branch_name}",
+            f"git branch {flag} {branch_name}",
             cwd=self.repo_root,
         )
 
@@ -139,7 +141,14 @@ class WorktreeManager:
 
         # If merge failed, abort to prevent dirty repo state
         if result.returncode != 0:
-            abort_merge(cwd=self.repo_root)
+            abort_result = abort_merge(cwd=self.repo_root)
+            if abort_result.returncode != 0:
+                # Abort itself failed — repo may be in conflict state
+                result.stderr += (
+                    f"\nWARNING: git merge --abort also failed: {abort_result.stderr}. "
+                    f"Repository may be in a conflict state. Manual intervention required: "
+                    f"run 'git merge --abort' or 'git reset --hard HEAD' from {self.repo_root}"
+                )
             return result
 
         if delete_after:

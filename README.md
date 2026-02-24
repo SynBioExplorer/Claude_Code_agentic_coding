@@ -42,10 +42,19 @@ python3 ~/.claude/orchestrator_code/environment.py
 
 - **Claude Code CLI** - The main Claude Code application
 - **Git** - For worktree management (must be initialized in project)
-- **tmux** - For parallel worker execution
-- **Python 3.10+** - For orchestrator utilities
-- **rich** - `pip install rich` for live dashboard
-- **PyYAML** (optional) - `pip install pyyaml` for YAML parsing
+- **tmux** - For parallel worker execution (`brew install tmux` on macOS, `apt install tmux` on Linux)
+- **Python 3.10+** - For orchestrator utilities (uses `X | Y` union type syntax)
+- **PyYAML** - `pip install pyyaml` for task file parsing
+- **rich** (optional) - `pip install rich` for live dashboard
+
+### 4. Platform Notes
+
+- **macOS required for auto-monitoring windows.** The dashboard/workers-view windows open via AppleScript (`osascript`), which only works on macOS with Terminal.app or iTerm. On Linux, run `dashboard.py` and `workers_view.py` manually in separate terminals.
+- **Conda path assumption.** The monitoring workers view assumes conda is at `/opt/miniconda3`. If conda is installed elsewhere or not used, the init falls back silently — `python3` just needs to be in your PATH.
+- **Default branch is `main`.** Several scripts (verify.py, worktree.py) compare against a `main` branch. If your default branch is named differently, you'll need to pass `--base <branch>` or adjust the defaults.
+- **Headless agents use `--dangerously-skip-permissions`.** Worker agents are spawned in tmux with full permission bypass for unattended execution. Review the generated `tasks.yaml` carefully before approving — this is the security gate.
+- **File locking uses `fcntl`.** State and context files use POSIX file locking. This works on macOS and Linux but not Windows.
+- **16 GB Node.js heap.** Worker sessions set `NODE_OPTIONS='--max-old-space-size=16384'`. On memory-constrained machines, reduce this in `tmux.py`.
 
 ## Usage
 

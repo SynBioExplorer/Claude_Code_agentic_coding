@@ -118,7 +118,10 @@ Instead of directly editing `main.py`, record your intent:
 
 The Supervisor will apply these intents using the framework adapter.
 
-### 5. Update Status
+### 5. Heartbeat & Update Status
+
+**Heartbeat:** The Supervisor monitors worker liveness by checking the tmux session process. You do **not** need to write heartbeat files — the Supervisor detects hung workers via `tmux list-panes` process detection. If your process crashes or hangs, the Supervisor will detect it and handle recovery.
+
 Keep `.task-status.json` updated frequently (at least every major step).
 
 **IMPORTANT: Use atomic writes to prevent JSON corruption:**

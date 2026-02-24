@@ -140,13 +140,21 @@ def compute_risk_score(plan: dict, config: dict | None = None) -> dict:
     factors = []
     tasks = plan.get("tasks", [])
 
+    # Pre-compile regex patterns for validation and performance
+    compiled_patterns = []
+    for pattern, weight in sensitive_patterns:
+        try:
+            compiled_patterns.append((re.compile(pattern, re.IGNORECASE), weight, pattern))
+        except re.error as e:
+            print(f"Warning: Invalid risk pattern '{pattern}': {e}", file=sys.stderr)
+
     # Factor 1: Sensitive paths
     for task in tasks:
         for path in task.get("files_write", []):
-            for pattern, weight in sensitive_patterns:
-                if re.search(pattern, path, re.IGNORECASE):
+            for compiled, weight, raw_pattern in compiled_patterns:
+                if compiled.search(path):
                     score += weight
-                    factors.append(f"sensitive_path:{path}:{pattern.split('|')[0]}")
+                    factors.append(f"sensitive_path:{path}:{raw_pattern.split('|')[0]}")
                     break
 
     # Factor 2: Scale - tasks
