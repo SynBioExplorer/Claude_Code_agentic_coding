@@ -92,6 +92,25 @@ Add a REST API for user management with CRUD operations
 | `verifier` | haiku | Per-task mechanical checks with failure categorization (logic error vs env issue vs timeout) |
 | `integration-checker` | sonnet | Post-merge checks: full test suite, security scanning, type checking |
 
+### Behavioral Enforcement (Superpowers Discipline)
+
+The orchestration system has strong *mechanical* enforcement (file boundaries, contracts, environment hashes) but that alone isn't enough — agents can comply with every structural rule while still producing poor work. To address this, each agent definition includes behavioral enforcement inspired by the [Superpowers](https://github.com/coleam00/superpowers) project by Cole Medin.
+
+Key concepts injected across agents:
+
+| Concept | Applied To | What It Prevents |
+|---------|-----------|-----------------|
+| **TDD Iron Law** | Worker | Writing production code before a failing test exists |
+| **Verification Gate** | Worker, Verifier | Claiming "done" without reading actual test output |
+| **Anti-Rationalization Tables** | All agents | Common excuses ("too simple to test", "I'll test later") with rebuttals |
+| **Debugging Protocol** | Worker | Thrashing on fixes without systematic root cause analysis (3-strike rule) |
+| **Output Reading Mandate** | Verifier, Integration-Checker | Treating exit code 0 as "passed" without reading output (e.g., `0 tests collected`) |
+| **`|| true` Compensation** | Integration-Checker | Masking real failures behind always-zero exit codes |
+| **Signal Verification** | Supervisor | Treating signal file existence as proof of success without cross-checking status |
+| **Verification Adequacy** | Planner-Architect | Planning tasks with placeholder verification commands (`echo "ok"`, `true`) |
+
+These are not suggestions — they're framed as iron laws with red-flag checklists that tell the agent to stop and correct course when it catches itself rationalizing shortcuts.
+
 ## Orchestrator Utilities
 
 Standalone Python scripts in `~/.claude/orchestrator_code/`:
