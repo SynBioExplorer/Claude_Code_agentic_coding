@@ -122,8 +122,13 @@ def open_monitoring_windows(project_dir: str = None):
 
     # Workers window - use live capture view instead of tmux attach
     # (tmux attach crashes with conda's tmux on macOS)
-    # Conda is always at /opt/miniconda3 per conda skill configuration
-    workers_cmd = f"cd {quoted_dir} && eval \"$(/opt/miniconda3/bin/conda shell.bash hook)\" 2>/dev/null || true; python3 ~/.claude/orchestrator_code/workers_view.py"
+    # Auto-detect conda path instead of hardcoding
+    conda_path = shutil.which("conda")
+    if conda_path:
+        conda_hook = f'eval "$({conda_path} shell.bash hook)" 2>/dev/null || true; '
+    else:
+        conda_hook = ""
+    workers_cmd = f"cd {quoted_dir} && {conda_hook}python3 ~/.claude/orchestrator_code/workers_view.py"
     if open_terminal_with_command(workers_cmd, app):
         print("  Opened Workers window (live capture view)")
     else:

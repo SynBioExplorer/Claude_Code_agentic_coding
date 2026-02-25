@@ -83,6 +83,18 @@ def get_modified_files(worktree_path: str) -> list:
         if result.returncode == 0:
             return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
         # Both diff strategies failed — do NOT return empty list
+        # Check if the branch has any commits at all
+        import subprocess as _sp
+        log_check = _sp.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=worktree_path, capture_output=True, text=True, check=False
+        )
+        if log_check.returncode != 0 or not log_check.stdout.strip():
+            raise DiffError(
+                f"No commits found on branch in {worktree_path}. "
+                f"The worker likely crashed before committing any changes. "
+                f"Check worker logs in .orchestrator/logs/"
+            )
         raise DiffError(
             f"Cannot determine modified files in {worktree_path}: "
             f"both HEAD~1..HEAD and main...HEAD failed. "

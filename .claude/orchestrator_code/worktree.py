@@ -68,6 +68,12 @@ class WorktreeManager:
         # Ensure worktree directory exists
         self.worktree_dir.mkdir(parents=True, exist_ok=True)
 
+        # Clean up leftover branch from previous run if it exists
+        run_command(
+            ["git", "branch", "-D", branch_name],
+            cwd=self.repo_root,
+        )
+
         # Create worktree with new branch
         result = run_command(
             f"git worktree add -b {branch_name} {worktree_path} {base_branch}",

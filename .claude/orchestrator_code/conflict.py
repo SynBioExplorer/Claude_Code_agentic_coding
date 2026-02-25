@@ -50,9 +50,15 @@ def get_implied_resources(intent: dict) -> list:
 
 
 def detect_conflicts(tasks: list) -> list:
-    """Detect file and resource conflicts between tasks."""
+    """Detect file and resource conflicts between tasks.
+
+    Checks for:
+    1. Write-write conflicts: two unordered tasks writing the same file/resource
+    2. Read-write conflicts: task reading a file while a concurrent task writes it
+    """
     conflicts = []
     file_writes = defaultdict(list)
+    file_reads = defaultdict(list)
     resource_writes = defaultdict(list)
 
     # Build dependency map
@@ -79,21 +85,41 @@ def detect_conflicts(tasks: list) -> list:
                     return True
         return False
 
-    # Collect writes
+    # Collect writes and reads
     for task in tasks:
         tid = task["id"]
         for f in task.get("files_write", []):
             file_writes[f].append(tid)
+        for f in task.get("files_read", []):
+            file_reads[f].append(tid)
         for r in task.get("resources_write", []):
             resource_writes[r].append(tid)
         for intent in task.get("patch_intents", []):
             for r in get_implied_resources(intent):
                 resource_writes[r].append(tid)
 
-    # Check file conflicts
+    # Check write-write file conflicts
     for file, writers in file_writes.items():
         if len(writers) > 1 and not tasks_ordered(writers):
-            conflicts.append({"type": "file", "target": file, "tasks": writers})
+            conflicts.append({"type": "file_write_write", "target": file, "tasks": writers})
+
+    # Check read-write file conflicts (concurrent tasks)
+    for file, writers in file_writes.items():
+        readers = file_reads.get(file, [])
+        for reader in readers:
+            if reader in writers:
+                continue  # Same task reading and writing its own file is fine
+            # Check if the reader and any writer are concurrent (no ordering)
+            concurrent_writers = [w for w in writers if w != reader]
+            if concurrent_writers:
+                pair = [reader] + concurrent_writers
+                if not tasks_ordered(pair):
+                    conflicts.append({
+                        "type": "file_read_write",
+                        "target": file,
+                        "tasks": pair,
+                        "detail": f"{reader} reads while {concurrent_writers} write"
+                    })
 
     # Check resource conflicts
     for resource, writers in resource_writes.items():

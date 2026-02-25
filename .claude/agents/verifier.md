@@ -318,24 +318,34 @@ If no test file found, fall back to `tests/` directory.
 
 ## Merge to Staging (On Success)
 
-**If ALL verification checks PASS**, you merge the task branch to staging:
+**If ALL verification checks PASS**, you merge the task branch to staging.
+
+**IMPORTANT:** Multiple verifiers may run concurrently. You MUST acquire the staging lock before any staging branch operations to prevent race conditions:
 
 ```bash
 # 1. Go to the project root (not the worktree)
 cd <project-root>
 
-# 2. Checkout staging branch
-git checkout staging
-
-# 3. Merge the task branch
-git merge task/<task-id> -m "Merge <task-id>: verification passed"
-
-# 4. Return to project root (if needed)
+# 2. Acquire staging lock, checkout staging, merge, then release lock
+python3 -c "
+import sys; sys.path.insert(0, '$HOME/.claude/orchestrator_code')
+from state import acquire_staging_lock, release_staging_lock
+lock = acquire_staging_lock()
+print('LOCK_ACQUIRED')
+" && \
+git checkout staging && \
+git merge task/<task-id> -m "Merge <task-id>: verification passed" && \
+python3 -c "
+import sys; sys.path.insert(0, '$HOME/.claude/orchestrator_code')
+# Lock is released when process exits (fcntl auto-release)
+"
 ```
+
+If the lock cannot be acquired within 30 seconds, another verifier is merging. Wait and retry.
 
 **If verification FAILS**, do NOT merge. Just signal failure.
 
-This atomic verify-then-merge ensures no window exists between "verified" and "merged" where state could change.
+This atomic verify-then-merge with staging lock ensures no window exists between "verified" and "merged" where state could change.
 
 ## Termination Protocol (CRITICAL)
 
@@ -352,8 +362,8 @@ python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/proj
 ```
 
 **CRITICAL NOTES:**
-- **DO NOT USE `touch`** - it creates empty files which the signal detection ignores
-- Use `python3 ~/.claude/orchestrator_code/tmux.py create-signal <path>` instead
+- Prefer `python3 ~/.claude/orchestrator_code/tmux.py create-signal <path>` for signal creation (writes timestamp content)
+- `touch` will also work (empty signal files are now accepted)
 - Look for "Signal file:" in your prompt for the exact path
 - Use absolute paths, not relative
 - Without a valid signal file, orchestration will hang

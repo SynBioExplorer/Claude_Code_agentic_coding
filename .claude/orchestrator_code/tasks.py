@@ -32,12 +32,13 @@ def load_plan(path: str) -> dict:
         return json.loads(content)
 
 
-def load_state() -> dict | None:
-    """Load existing state or return None."""
-    p = Path(".orchestration-state.json")
-    if p.exists():
-        return json.loads(p.read_text())
-    return None
+def load_state() -> dict:
+    """Load existing state or return empty dict.
+
+    Uses safe_read_json from state module for retry on partial writes.
+    """
+    from state import safe_read_json
+    return safe_read_json(Path(".orchestration-state.json"))
 
 
 def get_task_status(task_id: str, state: dict = None) -> str:
@@ -130,7 +131,7 @@ def get_ready_tasks(tasks_file: str = "tasks.yaml") -> list:
 def check_all_tasks() -> dict:
     """Check status of all tasks."""
     state = load_state()
-    if state is None:
+    if not state:
         return {"error": "No orchestration state found"}
 
     results = {

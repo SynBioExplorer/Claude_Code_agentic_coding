@@ -35,15 +35,35 @@ class FileDiffStats:
     lines_changed: int
 
 
+import re
+
+# Valid task ID pattern - prevents shell injection via branch names
+SAFE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./-]*$')
+
+
+def validate_ref_name(name: str) -> str:
+    """Validate a git ref name (branch, tag) is safe.
+
+    Raises ValueError if the name contains characters that could enable
+    shell injection when used in git commands.
+    """
+    if not SAFE_ID_PATTERN.match(name):
+        raise ValueError(
+            f"Unsafe git ref name: {name!r}. "
+            f"Must match {SAFE_ID_PATTERN.pattern}"
+        )
+    return name
+
+
 def run_command(
-    command: str,
+    command: str | list[str],
     cwd: str | Path | None = None,
     timeout: int = 60,
 ) -> CommandResult:
-    """Run a shell command and return the result.
+    """Run a command and return the result.
 
     Args:
-        command: Shell command to execute
+        command: Command as argument list (preferred) or shell string (legacy)
         cwd: Working directory for the command
         timeout: Timeout in seconds
 
@@ -51,11 +71,12 @@ def run_command(
         CommandResult with returncode, stdout, stderr
     """
     start = time.time()
+    use_shell = isinstance(command, str)
 
     try:
         result = subprocess.run(
             command,
-            shell=True,
+            shell=use_shell,
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -158,16 +179,17 @@ def get_modified_files(worktree: str | Path, base: str = "main") -> set[str]:
     Returns:
         Set of modified file paths (relative to worktree)
     """
+    validate_ref_name(base)
     # Get both staged and unstaged changes
     result = run_command(
-        f"git diff --name-only {base}...HEAD",
+        ["git", "diff", "--name-only", f"{base}...HEAD"],
         cwd=worktree,
     )
 
     if result.returncode != 0:
         # Fall back to comparing working tree
         result = run_command(
-            f"git diff --name-only {base}",
+            ["git", "diff", "--name-only", base],
             cwd=worktree,
         )
 
@@ -218,7 +240,7 @@ def get_file_diff_stats(worktree: str | Path, file_path: str) -> FileDiffStats:
         FileDiffStats with lines added, removed, and total changed
     """
     result = run_command(
-        f"git diff --numstat main -- {file_path}",
+        ["git", "diff", "--numstat", "main", "--", file_path],
         cwd=worktree,
     )
 
@@ -257,14 +279,12 @@ def commit_changes(
     # Stage files if specified
     if files:
         for f in files:
-            result = run_command(f"git add {f}", cwd=cwd)
+            result = run_command(["git", "add", f], cwd=cwd)
             if result.returncode != 0:
                 return result
 
-    # Commit
-    # Escape quotes in message
-    safe_message = message.replace('"', '\\"')
-    return run_command(f'git commit -m "{safe_message}"', cwd=cwd)
+    # Commit using argument list (no shell escaping needed)
+    return run_command(["git", "commit", "-m", message], cwd=cwd)
 
 
 def create_branch(
@@ -282,9 +302,11 @@ def create_branch(
     Returns:
         CommandResult from git branch
     """
-    cmd = f"git checkout -b {branch_name}"
+    validate_ref_name(branch_name)
+    cmd = ["git", "checkout", "-b", branch_name]
     if start_point:
-        cmd += f" {start_point}"
+        validate_ref_name(start_point)
+        cmd.append(start_point)
     return run_command(cmd, cwd=cwd)
 
 
@@ -298,7 +320,8 @@ def checkout_branch(branch_name: str, cwd: str | Path | None = None) -> CommandR
     Returns:
         CommandResult from git checkout
     """
-    return run_command(f"git checkout {branch_name}", cwd=cwd)
+    validate_ref_name(branch_name)
+    return run_command(["git", "checkout", branch_name], cwd=cwd)
 
 
 def merge_branch(
@@ -316,10 +339,10 @@ def merge_branch(
     Returns:
         CommandResult from git merge
     """
-    cmd = f"git merge {branch_name}"
+    validate_ref_name(branch_name)
+    cmd = ["git", "merge", branch_name]
     if message:
-        safe_message = message.replace('"', '\\"')
-        cmd += f' -m "{safe_message}"'
+        cmd.extend(["-m", message])
     return run_command(cmd, cwd=cwd)
 
 
@@ -350,8 +373,9 @@ def delete_branch(
     Returns:
         CommandResult from git branch -d/-D
     """
+    validate_ref_name(branch_name)
     flag = "-D" if force else "-d"
-    return run_command(f"git branch {flag} {branch_name}", cwd=cwd)
+    return run_command(["git", "branch", flag, branch_name], cwd=cwd)
 
 
 def stash_changes(cwd: str | Path | None = None, message: str | None = None) -> CommandResult:
@@ -364,10 +388,9 @@ def stash_changes(cwd: str | Path | None = None, message: str | None = None) -> 
     Returns:
         CommandResult from git stash
     """
-    cmd = "git stash"
+    cmd = ["git", "stash"]
     if message:
-        safe_message = message.replace('"', '\\"')
-        cmd += f' push -m "{safe_message}"'
+        cmd.extend(["push", "-m", message])
     return run_command(cmd, cwd=cwd)
 
 

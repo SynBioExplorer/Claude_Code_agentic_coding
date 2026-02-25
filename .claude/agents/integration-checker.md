@@ -85,22 +85,33 @@ Run security tools appropriate for the project's ecosystem:
 
 **Python:**
 ```bash
-# Check for security issues in code
-bandit -r src/ -f json || true
+# Check for security issues in code - capture exit code separately
+bandit -r src/ -f json > .orchestrator/logs/bandit-output.json 2>&1
+BANDIT_EXIT=$?
 
 # Check for vulnerable dependencies
-safety check --json || pip-audit --format json || true
+safety check --json > .orchestrator/logs/safety-output.json 2>&1
+SAFETY_EXIT=$?
+# Fallback
+if [ $SAFETY_EXIT -eq 127 ]; then
+    pip-audit --format json > .orchestrator/logs/pip-audit-output.json 2>&1
+    SAFETY_EXIT=$?
+fi
 ```
 
 **Node:**
 ```bash
-npm audit --json || true
+npm audit --json > .orchestrator/logs/npm-audit-output.json 2>&1
+NPM_AUDIT_EXIT=$?
 ```
 
 **Rust:**
 ```bash
-cargo audit --json || true
+cargo audit --json > .orchestrator/logs/cargo-audit-output.json 2>&1
+CARGO_AUDIT_EXIT=$?
 ```
+
+**IMPORTANT:** Do NOT use `|| true` to mask exit codes. Instead, capture exit codes in variables and parse the JSON output files. Exit code 127 means "tool not installed" (skip with warning). A non-zero exit code with output means real findings that must be reported accurately.
 
 Report vulnerabilities but don't necessarily fail - let the reviewer decide on severity.
 
@@ -274,9 +285,18 @@ git merge staging --ff-only -m "Promote staging to main: integration passed"
 # git branch -D staging
 ```
 
-**If `--ff-only` fails:** This means main was modified outside orchestration. Do NOT force merge. Signal failure and report the issue.
+**If `--ff-only` fails:** This means main diverged during orchestration. Do NOT force merge. Write a details file BEFORE signaling failure:
+```bash
+echo '{"reason": "merge_topology_failed", "detail": "main diverged, --ff-only cannot fast-forward"}' > .orchestrator/signals/integration-failure-details.json
+```
+Then signal failure as normal. This lets the Supervisor distinguish merge topology failures from test failures.
 
-**If integration FAILS**, do NOT merge. Main remains clean.
+**If integration tests FAIL**, write details before signaling:
+```bash
+echo '{"reason": "test_failed", "detail": "<summary of failures>"}' > .orchestrator/signals/integration-failure-details.json
+```
+
+**In both cases**, do NOT merge. Main remains clean.
 
 ## Termination Protocol (CRITICAL)
 
@@ -294,7 +314,7 @@ python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/proj
 python3 ~/.claude/orchestrator_code/tmux.py create-signal /absolute/path/to/project/.orchestrator/signals/integration.failed
 ```
 
-**DO NOT USE `touch`** - it creates empty files which the signal detection ignores.
+Prefer `python3 ~/.claude/orchestrator_code/tmux.py create-signal <path>` for signal creation (writes timestamp content). `touch` will also work (empty signal files are now accepted).
 
 ### What Your Signal Means
 

@@ -69,7 +69,7 @@ SUPERVISOR (sonnet)
      └──────────┴──────────┘
                │
                ▼
-VERIFIER (opus)
+VERIFIER (haiku)
 ├─ Run tests
 ├─ Validate file boundaries
 ├─ Check contract versions

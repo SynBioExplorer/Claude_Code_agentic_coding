@@ -140,21 +140,41 @@ def compute_risk_score(plan: dict, config: dict | None = None) -> dict:
     factors = []
     tasks = plan.get("tasks", [])
 
-    # Pre-compile regex patterns for validation and performance
+    # Pre-compile regex patterns with validation and ReDoS protection
     compiled_patterns = []
     for pattern, weight in sensitive_patterns:
+        # Reject patterns with nested quantifiers (ReDoS risk)
+        if re.search(r'(\+|\*|\{)\s*(\+|\*|\{)', pattern):
+            print(f"Warning: Rejecting risk pattern '{pattern}': nested quantifiers (ReDoS risk)", file=sys.stderr)
+            continue
         try:
             compiled_patterns.append((re.compile(pattern, re.IGNORECASE), weight, pattern))
         except re.error as e:
             print(f"Warning: Invalid risk pattern '{pattern}': {e}", file=sys.stderr)
 
-    # Factor 1: Sensitive paths
+    # Factor 1: Sensitive paths (with per-match timeout protection)
+    import signal
+
+    def _timeout_handler(signum, frame):
+        raise TimeoutError("Regex match timed out")
+
     for task in tasks:
         for path in task.get("files_write", []):
             for compiled, weight, raw_pattern in compiled_patterns:
-                if compiled.search(path):
-                    score += weight
-                    factors.append(f"sensitive_path:{path}:{raw_pattern.split('|')[0]}")
+                try:
+                    # Set 1-second alarm for regex matching (Unix only)
+                    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.alarm(1)
+                    match = compiled.search(path)
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+                    if match:
+                        score += weight
+                        factors.append(f"sensitive_path:{path}:{raw_pattern.split('|')[0]}")
+                        break
+                except TimeoutError:
+                    signal.alarm(0)
+                    print(f"Warning: Regex timeout on pattern '{raw_pattern}' against '{path}'", file=sys.stderr)
                     break
 
     # Factor 2: Scale - tasks

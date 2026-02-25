@@ -104,10 +104,9 @@ fi
 ENV_HASH=$(python3 ~/.claude/orchestrator_code/environment.py)
 echo "Environment hash: $ENV_HASH"
 
-# Create staging branch from main (fresh start)
+# Create staging branch from main (fresh start, force-create to handle leftovers)
 git checkout main
-git branch -D staging 2>/dev/null || true  # Delete old staging if exists
-git checkout -b staging main
+git checkout -B staging main
 ```
 
 ## Stage 1: Create Worktrees
@@ -222,7 +221,9 @@ This catches integration failures immediately, not after all tasks are merged.
 ls .orchestrator/signals/<task-id>.verified
 
 # === INCREMENTAL INTEGRATION CHECK ===
-# Run full test suite on staging to catch integration issues early
+# Acquire staging lock to prevent races with concurrent verifier merges
+# The lock auto-releases when the process exits
+python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/orchestrator_code'); from state import acquire_staging_lock; acquire_staging_lock(); print('staging lock acquired')"
 git checkout staging
 echo "Running incremental integration check after merging <task-id>..."
 

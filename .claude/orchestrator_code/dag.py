@@ -21,7 +21,10 @@ except ImportError:
 
 
 def load_plan(path: str) -> dict:
-    """Load plan from YAML or JSON file."""
+    """Load plan from YAML or JSON file.
+
+    NOTE: Canonical implementation is in state.py. Kept here for standalone CLI use.
+    """
     p = Path(path)
     content = p.read_text()
 
@@ -31,6 +34,23 @@ def load_plan(path: str) -> dict:
         return yaml.safe_load(content)
     else:
         return json.loads(content)
+
+
+def validate_dependency_ids(tasks: list) -> list[str]:
+    """Validate that all dependency IDs reference existing tasks.
+
+    Returns list of error messages (empty if valid).
+    """
+    task_ids = {t["id"] for t in tasks}
+    errors = []
+    for task in tasks:
+        for dep in task.get("depends_on", []):
+            if dep not in task_ids:
+                errors.append(
+                    f"Task '{task['id']}' depends on '{dep}' which does not exist. "
+                    f"Known task IDs: {sorted(task_ids)}"
+                )
+    return errors
 
 
 def detect_cycles(tasks: list) -> list | None:
@@ -96,6 +116,17 @@ def main():
 
     plan = load_plan(args.plan_file)
     tasks = plan.get("tasks", [])
+
+    # Validate dependency IDs exist before cycle detection
+    dep_errors = validate_dependency_ids(tasks)
+    if dep_errors:
+        if args.json:
+            print(json.dumps({"valid": False, "errors": dep_errors}, indent=2))
+        else:
+            print(f"\n✗ Invalid dependency references:")
+            for err in dep_errors:
+                print(f"  - {err}")
+        sys.exit(1)
 
     cycle = detect_cycles(tasks)
 

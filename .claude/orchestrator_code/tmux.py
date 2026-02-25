@@ -90,11 +90,12 @@ def wait_for_signal_file(signal_file: str, timeout: int = 600, poll_interval: fl
 
         # Check if signal file exists (not the .tmp version)
         if signal_path.exists() and not signal_path.with_suffix(signal_path.suffix + SIGNAL_SUFFIX_TMP).exists():
-            # Verify the file has content (fully written)
+            # Accept both empty and non-empty files as valid signals.
+            # Workers may use `touch` which creates empty files.
             try:
-                content = signal_path.read_text()
-                if content:  # Non-empty = valid signal
-                    return True
+                # Just verify the file is readable (not mid-write)
+                signal_path.read_text()
+                return True
             except Exception:
                 pass  # File might be in transition, keep waiting
 
@@ -514,6 +515,19 @@ def spawn_agent(
     if not Path(prompt_file).exists():
         return {"success": False, "error": f"Prompt file not found: {prompt_file}"}
 
+    # Verify claude is available (preflight may have passed but PATH may differ in tmux)
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        for candidate in [
+            os.path.expanduser("~/.local/bin/claude"),
+            "/usr/local/bin/claude",
+        ]:
+            if os.path.isfile(candidate):
+                claude_path = candidate
+                break
+    if not claude_path:
+        return {"success": False, "error": "claude not found in PATH or fallback locations. Install: npm install -g @anthropic-ai/claude-code"}
+
     # Send command using pipe (avoids $(cat) subshell escaping issues)
     cmd = f'unset CLAUDECODE && cat {shlex.quote(prompt_file)} | claude --dangerously-skip-permissions --permission-mode bypassPermissions -p'
     send_result = send_command(session_name, cmd)
@@ -521,9 +535,14 @@ def spawn_agent(
     if not send_result.get("success"):
         return {"success": False, "error": "Failed to send command to session"}
 
-    # Verify the process is actually running
+    # Verify the process is actually running (retry up to 3 times over ~10s)
     if verify_startup:
-        verify_result = verify_process_running(session_name, wait_seconds=3)
+        verify_result = None
+        for attempt in range(3):
+            wait = 3 if attempt == 0 else 3  # 3s + 3s + 3s = 9s total
+            verify_result = verify_process_running(session_name, wait_seconds=wait)
+            if verify_result["running"]:
+                break
         if not verify_result["running"]:
             return {
                 "success": False,
@@ -655,29 +674,28 @@ def monitor_with_timeout(
     while True:
         elapsed = time.time() - start_time
 
-        # Check if signal file appeared (use atomic verification)
+        # Check if signal file appeared (accept empty or non-empty)
         signal_path = Path(signal_file)
         if signal_path.exists():
             try:
-                content = signal_path.read_text()
-                if content:  # Non-empty = valid signal
-                    # Signal appeared - but also check if task is blocked
-                    # (worker creates signal even when blocked so orchestration doesn't hang)
-                    blocked = check_task_blocked(task_id)
-                    if blocked["blocked"]:
-                        return {
-                            "completed": False,
-                            "blocked": True,
-                            "blocked_reason": blocked.get("blocked_reason"),
-                            "needs_dependency": blocked.get("needs_dependency"),
-                            "elapsed_seconds": int(elapsed)
-                        }
-
+                signal_path.read_text()  # Verify readable
+                # Signal appeared - but also check if task is blocked
+                # (worker creates signal even when blocked so orchestration doesn't hang)
+                blocked = check_task_blocked(task_id)
+                if blocked["blocked"]:
                     return {
-                        "completed": True,
-                        "timeout": False,
+                        "completed": False,
+                        "blocked": True,
+                        "blocked_reason": blocked.get("blocked_reason"),
+                        "needs_dependency": blocked.get("needs_dependency"),
                         "elapsed_seconds": int(elapsed)
                     }
+
+                return {
+                    "completed": True,
+                    "timeout": False,
+                    "elapsed_seconds": int(elapsed)
+                }
             except Exception:
                 pass
 
@@ -693,6 +711,9 @@ def monitor_with_timeout(
             }
 
         # Check heartbeat (faster detection of hung workers)
+        # NOTE: Workers currently do NOT write heartbeat files (worker.md:143).
+        # This check is effectively disabled via the has_heartbeat guard.
+        # Kept for future use if heartbeat protocol is enabled.
         if elapsed > 30:  # Only check heartbeat after 30s (give worker time to start)
             heartbeat = check_heartbeat(task_id, stale_threshold=heartbeat_timeout)
             if heartbeat["has_heartbeat"] and heartbeat["stale"]:
