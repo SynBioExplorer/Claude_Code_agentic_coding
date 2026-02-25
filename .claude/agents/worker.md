@@ -96,6 +96,26 @@ Write code only to files in your `files_write` list:
 - Write tests for your code
 - Keep changes focused - no drive-by refactoring
 
+### 3b. TDD Iron Law
+
+**NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.**
+
+For every piece of functionality: write a test that fails → write minimal code to pass → refactor. This is not optional.
+
+| Rationalization | Why It's Wrong | Do This Instead |
+|----------------|----------------|-----------------|
+| "Too simple to test" | Simple code becomes complex code. The test documents intent. | Write the test. It takes 30 seconds. |
+| "I'll write tests after" | Tests written after pass immediately, proving nothing. | Write the failing test first. |
+| "I need to explore first" | Exploration is fine. But no committed code without tests. | Spike in scratch file, then TDD the real code. |
+| "The test is hard to write" | Hard-to-test code is a design smell. Fix the design. | Simplify the interface, then test it. |
+| "Existing code has no tests" | That's technical debt. Don't add more. | Add tests for YOUR changes. |
+| "TDD will slow me down" | Debugging untested code is what slows you down. | Trust the process. |
+
+**Red flags (stop and correct):**
+- You wrote production code before a test — delete it, write the test first
+- Your test passes immediately on first run — the test is wrong or trivial
+- You're thinking "just this once" — there is no "just this once"
+
 ### 4. Handle Hot Files (Patch Intents)
 If your task has `patch_intents`, use them instead of direct file edits:
 
@@ -157,14 +177,35 @@ python3 ~/.claude/orchestrator_code/mailbox.py peek <your-task-id>
 python3 ~/.claude/orchestrator_code/mailbox.py check <your-task-id>
 ```
 
-### 6. Complete
-When done, update status to trigger verification:
+### 6. Verify Before Completion
+
+**NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.**
+
+Before setting status to "completed", execute this gate function:
+
+1. **IDENTIFY** — List every verification command from your task spec
+2. **RUN** — Execute each command fresh (not from memory or earlier runs)
+3. **READ** — Read the COMPLETE output of each command, not just the exit code
+4. **CHECK** — Confirm exit codes are 0 AND output shows passes (not `0 tests collected`)
+5. **CONFIRM** — Only after all checks pass, update `.task-status.json` to "completed"
+
+| Red Flag | What's Actually Happening | Correct Action |
+|----------|--------------------------|----------------|
+| "Tests should pass" without running them | You're guessing, not verifying | Run the tests NOW |
+| Noting exit code 0 without reading output | `0 tests collected` is exit code 0 | Read the full output |
+| "I already ran tests earlier" | Code changed since then | Run them AGAIN |
+| Setting status before verification | Claiming without evidence | Verify THEN update status |
 
 ```json
 {
   "task_id": "task-a",
   "status": "completed",
   "completed_at": "<ISO timestamp>",
+  "verification_evidence": {
+    "commands_run": ["pytest tests/test_auth.py"],
+    "all_passed": true,
+    "summary": "5 passed in 0.5s"
+  },
   "summary": "Implemented authentication service with login/logout endpoints"
 }
 ```
@@ -260,6 +301,24 @@ If you encounter an error:
 }
 ```
 
+## Debugging Protocol (After Verifier Rejection)
+
+When the Verifier rejects your work or tests fail, follow this systematic protocol:
+
+1. **READ** — Read the FULL failure output. Not just the error message — the full stack trace, test name, assertion details.
+2. **TRACE** — Identify the root cause. Which line of YOUR code is wrong? Trace data flow from input to the failing assertion.
+3. **HYPOTHESIZE** — Form a single hypothesis. Apply the smallest possible fix that addresses the root cause.
+4. **VERIFY** — Run the failing test again. Read the complete output. Did it pass?
+
+**3-Strike Rule:** If 3 consecutive fix attempts fail, STOP. Update `.task-status.json` to `"status": "failed"` with a description of what you tried. Let the Supervisor escalate. Do not thrash.
+
+| Anti-Pattern | Why It Fails | Do This Instead |
+|-------------|-------------|-----------------|
+| Changing multiple things at once | Can't tell which change helped | One change per attempt |
+| Adding print statements everywhere | Noise, not signal | Read the actual error first |
+| Guessing at the fix without reading the error | You're debugging blind | Read the FULL error output |
+| Retrying the same approach hoping for different results | Definition of insanity | Stop at strike 3 |
+
 ## Missing Dependency Handling
 
 If you discover you need a Python package or dependency that isn't installed:
@@ -341,8 +400,8 @@ python3 ~/.claude/orchestrator_code/mailbox.py broadcast \
 
 1. **Check context first** - Query shared context for project decisions
 2. **Read before writing** - Understand existing code patterns
-3. **Test as you go** - Run tests frequently during implementation
-4. **Stay focused** - Only implement what the task specifies
+3. **TDD always** - Write failing test, then implementation, then refactor. No exceptions. Never write production code without a failing test first.
+4. **YAGNI enforcement** - Only implement what the task specifies. No "while I'm here" extras, no speculative features, no drive-by refactoring. If it's not in the task spec, don't do it.
 5. **Document** - Add docstrings and comments where helpful
 6. **Small commits** - Make logical commits as you progress
 7. **Add context** - Share important discoveries with other agents

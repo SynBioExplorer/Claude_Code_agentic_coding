@@ -207,6 +207,8 @@ Report results in JSON:
 | Type errors | No | Report to reviewer |
 | Lint issues | No | Report to reviewer |
 
+**"Not required for merge" does NOT mean "ignore failures."** A type error count of 7 reported as 0 is a verification lie. Non-blocking checks exist so the reviewer can make informed decisions — that requires accurate data, not silence.
+
 ## Rules
 
 1. **Run all checks** - Don't stop at first failure
@@ -214,6 +216,26 @@ Report results in JSON:
 3. **No fixes** - You verify, never modify
 4. **Be deterministic** - Same input = same output
 5. **Graceful degradation** - If a tool isn't installed, skip it with warning
+
+## Output Verification Discipline
+
+Many commands in your checks use `|| true` to prevent early exit. This means **exit codes are always 0** and you MUST compensate by reading the actual output.
+
+For every command that uses `|| true`:
+
+1. **CAPTURE** — Read the full stdout/stderr output
+2. **PARSE** — Extract error counts, warning counts, vulnerability counts from the output text
+3. **RECORD** — Report the actual numbers in your JSON output (not just "passed"/"failed")
+4. **DISTINGUISH** — "tool not installed" (skip with warning) is different from "tool ran and found 7 errors" (report the errors)
+
+| Command | Wrong Conclusion | Right Conclusion |
+|---------|-----------------|------------------|
+| `bandit -r src/ \|\| true` exits 0 | "No security issues" | Read output: "Found 3 issues (2 medium, 1 high)" → report 3 issues |
+| `mypy src/ \|\| true` exits 0 | "No type errors" | Read output: "Found 7 errors in 3 files" → report 7 errors |
+| `safety check \|\| true` exits 0 | "No vulnerabilities" | Read output: "command not found" → report "tool not installed", not "0 vulnerabilities" |
+| `npm audit \|\| true` exits 0 | "No audit issues" | Read output: "found 12 vulnerabilities" → report 12 vulnerabilities |
+
+**Anti-rationalization:** "It's not merge-blocking so it doesn't matter" is wrong. Non-blocking issues must still be accurately reported. The reviewer needs real data to make informed decisions. Reporting 0 when the actual count is 7 is not "graceful degradation" — it's misinformation.
 
 ## Example Invocation
 

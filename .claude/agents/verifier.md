@@ -167,9 +167,11 @@ npx tsc --noEmit src/services/<implementation>.ts
 | Rust | cargo | `cargo check` (built-in) |
 | Go | go vet | `go vet ./...` (built-in) |
 
-**Skip this step ONLY if:**
-- Task has no contract dependencies (standalone utility)
-- Language has no static type checker available
+**Skip this step ONLY if (with concrete verification):**
+- Task has no contract dependencies — confirm by checking `contracts_used` in `.task-status.json` is empty or absent, not by assumption
+- Language has no static type checker available — confirm by running `which mypy || which pyright || which tsc` and verifying none are found
+
+**Anti-rationalization:** "This task probably doesn't need type checking" is not a valid skip reason. Check the evidence. If `contracts_used` lists contracts, type checking is mandatory. If a type checker is installed, run it.
 
 ## Boundary Validation Details
 
@@ -229,6 +231,26 @@ Report verification results:
 3. **Report Everything** - Include all outputs, even for passing checks
 4. **No Modifications** - You read and verify, never write or fix
 5. **Be Precise** - Report exact file names, line numbers, error messages
+
+## Output Reading Mandate
+
+**Every verification result MUST be based on reading actual output, not just exit codes.**
+
+For each verification command, follow this gate:
+
+1. **RUN** — Execute the command
+2. **READ** — Read the COMPLETE output (stdout and stderr), not just the last line
+3. **COUNT** — Extract actual numbers: tests passed, failed, skipped, errors
+4. **CROSS-CHECK** — Confirm the output narrative matches the exit code (e.g., exit 0 with "0 tests collected" is NOT a pass)
+5. **RECORD** — Include the actual counts and key output lines in your report
+
+| Anti-Pattern | What Goes Wrong | Correct Approach |
+|-------------|-----------------|------------------|
+| Appending `\|\| true` to mask failures | Exit code is always 0, real failures hidden | Run without `\|\| true`, report the actual exit code |
+| Noting exit code 0 without reading output | `0 tests collected` or `no tests ran` passes silently | Read output, confirm actual test count > 0 |
+| Truncating long output | Failure details at the bottom are missed | Read the FULL output, especially the summary line |
+| Reporting "tests passed" from memory | You may be remembering a previous run | Run fresh and read the new output |
+| Treating warnings as passes | Deprecation warnings can hide real issues | Report warning count separately from pass/fail |
 
 ## Failure Reporting
 

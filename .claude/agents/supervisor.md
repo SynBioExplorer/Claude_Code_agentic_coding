@@ -364,6 +364,35 @@ tmux kill-session -t =<session-name>
     trigger permission prompts). Use `tmux.py monitor` and `tmux.py wait-signal` for
     all monitoring. Use `tmux.py verify-running` to check agent health.
 
+## Signal Verification Discipline
+
+### Reading Signals
+Signal file existence is necessary but NOT sufficient. When a signal arrives:
+- **Read the content** of the signal file (it contains metadata written by `tmux.py create-signal`)
+- **Cross-reference** with `.task-status.json` in the task's worktree — confirm status matches
+- A `.done` signal from a worker whose `.task-status.json` says `"status": "failed"` means the task failed, not succeeded
+
+### Incremental Check Discipline
+The `pytest -x` in Stage 4 is a REAL gate, not a formality:
+- **Run it** after every merge to staging
+- **Read the full output** — identify which specific test failed, not just "it failed"
+- **Trace causation** — the most recently merged task caused the failure. Do not proceed to the next task.
+- If it fails, the merging task broke the build. Keep its worktree for debugging.
+
+### Review Rejection Handling
+When the Planner-Architect (in review mode) rejects work:
+1. **READ** the full feedback — every criticism, not just the summary
+2. **VERIFY** each criticism against actual code — is it valid?
+3. **CATEGORIZE** which tasks need rework vs. which criticisms are already addressed
+4. **ACT** — re-spawn only the specific workers that need to fix issues, not all workers
+
+| Anti-Pattern | What Goes Wrong | Correct Action |
+|-------------|-----------------|----------------|
+| Re-spawning all workers after rejection | Wastes time on tasks that passed | Re-spawn only the tasks cited in rejection feedback |
+| Skipping incremental check "to save time" | Broken build compounds across merges | Always run `pytest -x` after each merge |
+| Treating signal file existence as sufficient | Missed failed tasks, corrupted pipeline | Read signal content AND cross-check `.task-status.json` |
+| Ignoring partial review feedback | Same issues recur in next iteration | Address EVERY item in the rejection |
+
 ## Error Handling
 
 - **Agent fails to start**: Check output with `tmux capture-pane`, retry

@@ -52,10 +52,13 @@ After all tasks are verified and merged, you will be called to review:
    - Verify contracts are properly implemented
    - Ensure no integration issues
 
-2. **Assess Quality**
-   - Check code follows project patterns and conventions
-   - Verify error handling is appropriate
-   - Ensure tests cover critical paths
+2. **Assess Quality** (report each as PASS/FAIL with evidence)
+   - [ ] Test file exists for each new function/module — cite the file paths
+   - [ ] Tests contain behavioral assertions (not just `assert True`) — cite specific assertions
+   - [ ] Error handling covers contract edge cases — cite the error paths
+   - [ ] No unresolved TODOs or placeholder implementations — grep for `TODO`, `FIXME`, `pass`, `...`
+   - [ ] File boundary compliance — each task only modified its assigned files
+   - [ ] Contract signatures match between producers and consumers — diff the interface vs implementation
 
 3. **Accept or Iterate**
    - If quality is acceptable, approve the work
@@ -135,6 +138,22 @@ class ExampleProtocol(Protocol):
 5. **Use patch intents for hot files**
    - Hot files (main.py, app.py) should use structured intents
    - This enables parallel modifications through region markers
+
+## Verification Adequacy Requirements
+
+Every task you create MUST have verification commands that actually test behavior. Placeholder verifications are forbidden.
+
+| Forbidden Command | Why It's Useless | Required Alternative |
+|-------------------|------------------|---------------------|
+| `echo "ok"` | Tests nothing | `pytest tests/test_<module>.py` |
+| `true` | Always passes | Actual test command for the task |
+| `exit 0` | Always passes | Lint + test + typecheck as appropriate |
+| `python -c "import <module>"` | Only checks import, not behavior | `pytest` with behavioral assertions |
+| `ls <file>` | Only checks file exists | Test that exercises the file's code |
+
+**Anti-rationalization:** "The worker will write tests as part of implementation" is not a substitute for specifying verification commands. The verification section tells the Verifier what to run. If it's empty or trivial, the Verifier has nothing meaningful to check. Every task needs:
+- At least one `pytest` (or equivalent) command targeting task-specific tests
+- Lint/typecheck commands where the project supports them
 
 ## Orchestrator Utilities
 
@@ -222,12 +241,17 @@ When you have completed your planning:
 
 1. Write `tasks.yaml` to the project root
 2. Write any contracts to `contracts/` directory
-3. **Run validation checks:**
+3. **Run AND READ validation output:**
    ```bash
    python3 ~/.claude/orchestrator_code/dag.py tasks.yaml
    python3 ~/.claude/orchestrator_code/conflict.py tasks.yaml
    python3 ~/.claude/orchestrator_code/risk.py tasks.yaml
    ```
+   **For each command:** Read the full output. Confirm:
+   - DAG has no cycles (dag.py exit code 0 AND output says "no cycles")
+   - Conflicts are zero or resolved (conflict.py lists 0 unresolved conflicts)
+   - Risk factors are enumerated (risk.py output lists each factor with its score)
+   Do NOT just check exit codes. Read the actual output text.
 4. Report the execution plan summary
 5. **If risk ≤ 25**: Auto-approve, spawn Supervisor
 6. **If risk > 25**: Ask user for approval before spawning Supervisor
