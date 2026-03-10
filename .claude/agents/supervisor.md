@@ -1,7 +1,7 @@
 ---
 name: supervisor
 description: "Orchestrates parallel task execution using tmux-based agent spawning. NO Task tool access - all agents spawn via tmux.py."
-tools: Read, Write, Glob, Bash(git:*), Bash(python3 ~/.claude/orchestrator_code:*), Bash(tmux:*), Bash(uv:*), Bash(npm:*), Bash(pip:*), Bash(cat:*), Bash(mkdir:*), Bash(rm:*), Bash(sleep:*), Bash(tail:*), Bash(ls:*), Bash(touch:*)
+tools: Read, Write, Glob, Bash(git:*), Bash(python3 ~/.claude/orchestrator_code:*), Bash(python3 -c:*), Bash(tmux:*), Bash(uv:*), Bash(npm:*), Bash(pip:*), Bash(cat:*), Bash(mkdir:*), Bash(rm:*), Bash(sleep:*), Bash(tail:*), Bash(ls:*), Bash(touch:*), Bash(echo:*)
 model: sonnet
 color: pink
 ---
@@ -157,8 +157,8 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-<task-id> \
 ### Concurrency Limits
 
 - **Maximum 5 parallel workers** (not 7) to avoid API rate limits
-- **Stagger spawn times by 15 seconds** between workers — use `sleep 15` between
-  each `tmux.py spawn-agent` call to prevent simultaneous API initialization bursts
+- **Stagger spawn times by 15 seconds** between workers — use a separate `sleep 15`
+  Bash tool call (NOT chained with `&&`) before each `tmux.py spawn-agent` call
 - If a wave has more than 5 tasks, split into sub-waves
 
 **Context Injection**: The `get-for-task` command looks up relevant context from the project's `.context/` store and injects it directly into the worker prompt. This is better than workers pulling context at runtime because:
@@ -360,10 +360,15 @@ tmux kill-session -t =<session-name>
    agent before merging. Never merge unverified work. Never skip verification.
 9. **Mandatory integration check** - After all tasks are merged to staging, MUST
    spawn Integration-Checker to merge staging to main. Never merge to main directly.
-10. **No bash polling loops** - FORBIDDEN: `while true; do sleep N && ls signals/; done`.
-    Use separate Bash tool calls for each command, not `&&` chains (compound commands
-    trigger permission prompts). Use `tmux.py monitor` and `tmux.py wait-signal` for
-    all monitoring. Use `tmux.py verify-running` to check agent health.
+10. **ONE command per Bash tool call** - CRITICAL: Every Bash tool call must contain
+    exactly ONE command. NEVER combine commands with `&&`, `;`, `|`, newlines, or any
+    other chaining. Compound commands trigger permission prompts that block execution.
+    WRONG: `sleep 15 && python3 tmux.py spawn-agent ... && echo "done"`
+    RIGHT: Three separate Bash tool calls: `sleep 15`, then `python3 ...`, then `echo ...`
+    For variable substitution, use inline values directly in the command instead of
+    setting shell variables in a prior command (shell state doesn't persist between calls).
+    FORBIDDEN: `while true; do ... done` polling loops.
+    Use `tmux.py wait-signal` for monitoring, not bash loops.
 
 ## Signal Verification Discipline
 
