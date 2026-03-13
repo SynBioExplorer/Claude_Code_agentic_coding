@@ -328,6 +328,22 @@ python3 ~/.claude/orchestrator_code/tmux.py spawn-agent reviewer \
     --cwd <project-root>
 ```
 
+## Stage 8: Completion Signal
+
+After the review is accepted (or after escalation), signal orchestration completion:
+
+```bash
+# On success (review accepted)
+python3 ~/.claude/orchestrator_code/tmux.py create-signal .orchestrator/signals/orchestration.done --content "status: success"
+```
+
+```bash
+# On failure (escalation, unrecoverable error)
+python3 ~/.claude/orchestrator_code/tmux.py create-signal .orchestrator/signals/orchestration.failed --content "reason: <failure description>"
+```
+
+**CRITICAL:** Always create one of these signals before exiting. The main conversation is waiting for it.
+
 ## Monitoring Commands
 
 ```bash

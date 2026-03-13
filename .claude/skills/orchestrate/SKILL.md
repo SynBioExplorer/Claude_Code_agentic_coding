@@ -29,7 +29,7 @@ This verifies: tmux, claude, git repo, pyyaml, rich, NODE_OPTIONS, and ulimit. F
 
 ## How to Execute
 
-**Immediately spawn the planner-architect agent** using the Task tool:
+**Step 1: Plan** — Spawn the planner-architect agent using the Task tool:
 
 ```
 Task tool parameters:
@@ -39,6 +39,29 @@ Task tool parameters:
 ```
 
 Do not analyze or plan yourself - delegate to the planner-architect agent which has specialized capabilities for this workflow.
+
+The planner-architect will analyze the codebase, create tasks.yaml, and **spawn the supervisor in tmux**.
+When the planner-architect returns, the supervisor is already running autonomously.
+
+**Step 2: Monitor** — Wait for orchestration to complete:
+
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py wait-signal .orchestrator/signals/orchestration.done --timeout 7200
+```
+
+If the signal does not appear, check for failure:
+
+```bash
+ls .orchestrator/signals/orchestration.failed
+```
+
+You can also check real-time progress:
+
+```bash
+python3 ~/.claude/orchestrator_code/state.py status
+```
+
+**Step 3: Report** — When the orchestration completes, report results to the user.
 
 ## Pipeline Overview
 

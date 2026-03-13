@@ -262,22 +262,36 @@ When plan is approved (either auto-approved with risk ≤ 25, or user-approved):
 
 **IMPORTANT: Do NOT attempt to execute tasks yourself. You MUST delegate to the Supervisor agent.**
 
-Use the Task tool to spawn the Supervisor with a MINIMAL prompt:
+**Spawn the Supervisor via tmux** for headless execution (eliminates permission prompts):
 
-- subagent_type: "supervisor"
-- model: "sonnet"
-- prompt: |
-    Execute the orchestration plan.
+1. Write the supervisor prompt to `.orchestrator/prompts/supervisor.md`:
 
-    Project directory: <absolute path>
-    Tasks file: <path to tasks.yaml>
-    Environment hash: <hash>
-    Original request: <user's request>
+```bash
+cat > .orchestrator/prompts/supervisor.md << 'EOF'
+Execute the orchestration plan.
 
-    Follow your standard operating procedures from your system instructions.
-    Use `python3 ~/.claude/orchestrator_code/context.py get-for-task <id>` to inject context into worker prompts.
+Project directory: <absolute path>
+Tasks file: <path to tasks.yaml>
+Environment hash: <hash>
+Original request: <user's request>
 
-**Do NOT include in the prompt:**
+Follow your standard operating procedures from your system instructions.
+Use `python3 ~/.claude/orchestrator_code/context.py get-for-task <id>` to inject context into worker prompts.
+EOF
+```
+
+2. Spawn the supervisor in tmux:
+
+```bash
+python3 ~/.claude/orchestrator_code/tmux.py spawn-agent supervisor \
+    --prompt-file .orchestrator/prompts/supervisor.md \
+    --cwd <project-root>
+```
+
+3. **Return immediately.** The supervisor runs autonomously in tmux with full permissions.
+   The main conversation will monitor for completion via the `orchestration.done` signal.
+
+**Do NOT include in the supervisor prompt:**
 - Git commands or worktree instructions (supervisor.md has them)
 - tmux.py API docs or command syntax (supervisor.md has them)
 - Monitoring loop implementations (supervisor.md has them)
