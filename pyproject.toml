@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-    { name = "Claude Code", email = "support@anthropic.com" }
+    { name = "Felix Meier" }
 ]
 keywords = ["claude", "agents", "orchestration", "automation"]
 classifiers = [
