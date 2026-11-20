@@ -1,321 +1,84 @@
-# Claude Code Multi-Agent Orchestration System
+# Claude Code Multi-Agent Orchestration
 
-A parallel task execution system for Claude Code that uses git worktrees, DAG-based scheduling, and coordinated agents to implement complex multi-file features.
+Coordinates several Claude Code agents working on one repository at the same time. A planner agent splits a request into tasks that declare the files they own and the tasks they depend on. Each task runs in its own git worktree against interface contracts fixed before the work starts. Each finished task is verified before it is merged into a staging branch, and the integrated result is checked before it reaches `main`. The aim is that parallel changes merge without collisions.
 
-## Overview
+This is a prototype made of Claude Code agent definitions, one skill and standalone Python scripts. It is not packaged, and the scripts have no automated tests. [Status](#status) separates what is implemented from what is only instructions to the agents and what is design only.
 
-This system transforms complex requests into coordinated parallel execution:
+## The problem
 
-![Architecture Diagram](architecture.svg)
+Agents working in parallel on one codebase tend to fail in three ways:
 
-## Installation
+- Two agents edit the same file on separate branches, and nobody owns the resulting conflict.
+- One agent codes against an interface that another agent is still deciding, so each side passes its own tests and the two fail together.
+- An agent reports that its work is done, and the report is accepted without evidence.
 
-### 1. Copy agents to your global Claude config
+Each has a counterpart here: exclusive file ownership with dependency ordering, version-stamped interface contracts, and a verifier that is not the agent that did the work.
 
-```bash
-# Clone this repo (or download the .claude folder)
-git clone https://github.com/SynBioExplorer/Claude_Code_agentic_coding.git
-cd Claude_Code_agentic_coding
+## How it works
 
-# Copy agents
-cp -r .claude/agents/* ~/.claude/agents/
-
-# Copy orchestrator utilities
-cp -r .claude/orchestrator_code ~/.claude/
-
-# Copy the orchestrate skill
-mkdir -p ~/.claude/skills
-cp -r .claude/skills/orchestrate ~/.claude/skills/
+```mermaid
+flowchart LR
+    subgraph P ["Plan"]
+        direction TB
+        REQ["/orchestrate request"] --> PLAN["Planner-Architect<br/>tasks.yaml, contracts/<br/>dag.py, conflict.py, risk.py"]
+        PLAN --> GATE{"risk score<br/>above 25?"}
+        GATE -->|"yes"| ASK["user approves first"]
+    end
+    subgraph E ["Execute"]
+        direction TB
+        SUP["Supervisor<br/>creates staging from main"] --> WA["Worker, task-a<br/>.worktrees/task-a"]
+        SUP --> WB["Worker, task-b<br/>.worktrees/task-b"]
+        WA -->|"done signal"| VER["Verifier, per task<br/>tests, boundaries,<br/>contract types, env hash<br/>fail: nothing merged"]
+        WB -->|"done signal"| VER
+    end
+    subgraph I ["Integrate"]
+        direction TB
+        STG["staging<br/>pytest -x after each merge"] --> INT["Integration-Checker<br/>full tests, security, types<br/>fail: main untouched"]
+        INT -->|"git merge --ff-only"| MAIN["main"]
+        MAIN --> REV["Reviewer<br/>accept, iterate (max 3),<br/>or escalate to the user"]
+    end
+    P -->|"approved, or score 25 or less"| E
+    E -->|"pass: merge task branch"| I
 ```
 
-### 2. Verify installation
+The planner-architect runs as a subagent of the `orchestrate` skill. Every later agent is a separate `claude -p` process in its own tmux session, started by `tmux.py`. Stages hand over through signal files in `.orchestrator/signals/`: `<task-id>.done`, `<task-id>.verified`, `<task-id>.failed`, `integration.passed`, `integration.failed` and `orchestration.done`.
 
-```bash
-# Test the utilities work
-python3 ~/.claude/orchestrator_code/contracts.py TestProtocol method1 method2
-python3 ~/.claude/orchestrator_code/environment.py
+## Status
 
-# Should see no errors
-```
+| Part | At HEAD | Notes |
+|------|---------|-------|
+| Plan validation: unknown dependencies, cycles, execution waves | Implemented | `dag.py` |
+| Collision detection on files and resources | Implemented | `conflict.py` |
+| Risk score and approval threshold | Implemented | `risk.py` |
+| Contract stub generation, stamped with the git hash | Implemented | `contracts.py` |
+| Contract version comparison | Not implemented | The version is recorded, never compared |
+| Boundary check, verification commands, environment hash | Implemented | `verify.py`, `environment.py`; see [Limitations](#limitations) |
+| Task state machine, resume, atomic state file | Implemented | `state.py`; the agents call only its staging lock |
+| Agent spawning, signal files, timeouts, pre-flight check | Implemented | `tmux.py` |
+| Worker mailbox, shared context store | Implemented | `mailbox.py`, `context.py` |
+| Git worktree and git helpers | Implemented, not called by any agent definition | `worktree.py`, `git.py` |
+| Terminal dashboard, worker view, monitoring windows | Implemented, started by hand | `dashboard.py`, `workers_view.py`, `monitoring.py` |
+| Stage order, merge to staging, fast-forward to `main`, review loop, escalation | Instructions to the agents, not code | `.claude/agents/*.md` |
+| Structured patch intents, framework adapters, region markers | Design only | `ARCHITECTURE_8.md`; an earlier implementation was removed in `f7df662` |
+| Churn and format-only checks, `files_append`, `{modified_tests}` | Design only | `ARCHITECTURE_8.md` |
+| `.claude-agents.yaml` sections other than `risk:` | Design only | `ARCHITECTURE_8.md` |
 
-### 3. Requirements
+`pytest tests/e2e_demo` passes (44 tests), but it covers only the three demo modules in that directory. `tests/unit` and `tests/integration` import a package that was removed and fail at collection. The git history holds one recorded exercise of the pipeline, a three-module calculator demo; see [Limitations](#limitations).
 
-- **Claude Code CLI** - The main Claude Code application
-- **Git** - For worktree management (must be initialized in project)
-- **tmux** - For parallel worker execution (`brew install tmux` on macOS, `apt install tmux` on Linux)
-- **Python 3.10+** - For orchestrator utilities (uses `X | Y` union type syntax)
-- **PyYAML** - `pip install pyyaml` for task file parsing
-- **rich** (optional) - `pip install rich` for live dashboard
+## Mechanisms
 
-### 4. Platform Notes
+This section describes what the scripts do and what the agent definitions instruct. The [Status](#status) table says which is which.
 
-- **macOS required for auto-monitoring windows.** The dashboard/workers-view windows open via AppleScript (`osascript`), which only works on macOS with Terminal.app or iTerm. On Linux, run `dashboard.py` and `workers_view.py` manually in separate terminals.
-- **Conda path assumption.** The monitoring workers view assumes conda is at `/opt/miniconda3`. If conda is installed elsewhere or not used, the init falls back silently — `python3` just needs to be in your PATH.
-- **Default branch is `main`.** Several scripts (verify.py, worktree.py) compare against a `main` branch. If your default branch is named differently, you'll need to pass `--base <branch>` or adjust the defaults.
-- **Headless agents use `--dangerously-skip-permissions`.** Worker agents are spawned in tmux with full permission bypass for unattended execution. Review the generated `tasks.yaml` carefully before approving — this is the security gate.
-- **File locking uses `fcntl`.** State and context files use POSIX file locking. This works on macOS and Linux but not Windows.
-- **16 GB Node.js heap.** Worker sessions set `NODE_OPTIONS='--max-old-space-size=16384'`. On memory-constrained machines, reduce this in `tmux.py`.
+### Tasks and dependencies
 
-## Usage
-
-### Quick Start - Use the Skill
-
-In any Claude Code session:
-
-```
-/orchestrate Add user authentication with JWT tokens and refresh flow
-```
-
-This invokes the planner-architect agent which will:
-1. Analyze your codebase
-2. Create `tasks.yaml` with parallel task definitions
-3. Generate interface contracts in `contracts/`
-4. Compute risk score and ask for approval if needed
-5. Spawn the supervisor to execute
-
-### Manual Invocation
-
-You can also invoke agents directly:
-
-```
-Use the planner-architect agent to design an implementation for:
-Add a REST API for user management with CRUD operations
-```
-
-## Agents
-
-| Agent | Model | Role |
-|-------|-------|------|
-| `planner-architect` | opus | Analyzes codebase, decomposes into parallel tasks, generates contracts, reviews integration |
-| `supervisor` | sonnet | Creates git worktrees, spawns workers in tmux, monitors progress, handles merges, mediates dependency requests |
-| `worker` | sonnet | Executes single task in isolated worktree, respects file boundaries |
-| `verifier` | haiku | Per-task mechanical checks with failure categorization (logic error vs env issue vs timeout) |
-| `integration-checker` | sonnet | Post-merge checks: full test suite, security scanning, type checking |
-
-### Behavioral Enforcement (Superpowers Discipline)
-
-The orchestration system has strong *mechanical* enforcement (file boundaries, contracts, environment hashes) but that alone isn't enough — agents can comply with every structural rule while still producing poor work. To address this, each agent definition includes behavioral enforcement inspired by the [Superpowers](https://github.com/coleam00/superpowers) project by Cole Medin.
-
-Key concepts injected across agents:
-
-| Concept | Applied To | What It Prevents |
-|---------|-----------|-----------------|
-| **TDD Iron Law** | Worker | Writing production code before a failing test exists |
-| **Verification Gate** | Worker, Verifier | Claiming "done" without reading actual test output |
-| **Anti-Rationalization Tables** | All agents | Common excuses ("too simple to test", "I'll test later") with rebuttals |
-| **Debugging Protocol** | Worker | Thrashing on fixes without systematic root cause analysis (3-strike rule) |
-| **Output Reading Mandate** | Verifier, Integration-Checker | Treating exit code 0 as "passed" without reading output (e.g., `0 tests collected`) |
-| **`|| true` Compensation** | Integration-Checker | Masking real failures behind always-zero exit codes |
-| **Signal Verification** | Supervisor | Treating signal file existence as proof of success without cross-checking status |
-| **Verification Adequacy** | Planner-Architect | Planning tasks with placeholder verification commands (`echo "ok"`, `true`) |
-
-These are not suggestions — they're framed as iron laws with red-flag checklists that tell the agent to stop and correct course when it catches itself rationalizing shortcuts.
-
-## Orchestrator Utilities
-
-Standalone Python scripts in `~/.claude/orchestrator_code/`:
-
-| Script | Purpose | Example |
-|--------|---------|---------|
-| `tmux.py` | Tmux session management, monitoring | `python3 ~/.claude/orchestrator_code/tmux.py spawn-agent worker-1 --prompt-file p.md --cwd .` |
-| `risk.py` | Compute risk score | `python3 ~/.claude/orchestrator_code/risk.py tasks.yaml` |
-| `conflict.py` | Detect file/resource conflicts | `python3 ~/.claude/orchestrator_code/conflict.py tasks.yaml` |
-| `dag.py` | Validate DAG, show execution waves | `python3 ~/.claude/orchestrator_code/dag.py tasks.yaml` |
-| `contracts.py` | Generate Protocol stubs | `python3 ~/.claude/orchestrator_code/contracts.py MyProtocol login logout -o contracts/my.py` |
-| `environment.py` | Compute/verify env hash | `python3 ~/.claude/orchestrator_code/environment.py --verify abc123` |
-| `state.py` | Manage orchestration state | `python3 ~/.claude/orchestrator_code/state.py init/status/resume` |
-| `tasks.py` | Check task readiness, blocked tasks | `python3 ~/.claude/orchestrator_code/tasks.py blocked` |
-| `verify.py` | Full verification suite | `python3 ~/.claude/orchestrator_code/verify.py full task-a tasks.yaml` |
-| `context.py` | Shared context store, prompt injection | `python3 ~/.claude/orchestrator_code/context.py get-for-task task-a` |
-| `mailbox.py` | Inter-worker messaging and broadcasts | `python3 ~/.claude/orchestrator_code/mailbox.py send task-b "API changed" --from worker-task-a` |
-| `dashboard.py` | Live monitoring dashboard | `python3 ~/.claude/orchestrator_code/dashboard.py` |
-| `workers_view.py` | Live worker output panels | `python3 ~/.claude/orchestrator_code/workers_view.py` |
-| `monitoring.py` | Open/manage monitoring windows | `python3 ~/.claude/orchestrator_code/monitoring.py open` |
-
-All scripts support `--json` for machine-readable output.
-
-### Live Dashboard
-
-Monitor orchestration in real-time:
-
-```bash
-# Start live dashboard (updates every second)
-python3 ~/.claude/orchestrator_code/dashboard.py
-
-# Custom refresh rate
-python3 ~/.claude/orchestrator_code/dashboard.py --refresh 2
-
-# Show once and exit
-python3 ~/.claude/orchestrator_code/dashboard.py --once
-```
-
-Requires `rich` library: `pip install rich`
-
-**Dashboard Output:**
-
-```
-                              ORCHESTRATION STATUS
-╭───────────────────┬───────────────┬──────────┬──────────────────┬────────────╮
-│ Task              │ Status        │ Agent    │ Context          │ Progress   │
-├───────────────────┼───────────────┼──────────┼──────────────────┼────────────┤
-│ task-auth-service │ ● executing   │ worker   │ 45.2k/200.0k     │ Working... │
-│                   │               │          │ (23%)            │            │
-│ task-auth-routes  │ ● executing   │ worker   │ 12.1k/200.0k     │ Working... │
-│                   │               │          │ (6%)             │            │
-│ task-user-model   │ ✓ verified    │ done     │ -                │ Complete   │
-│ task-api-tests    │ ○ pending     │ -        │ -                │ Waiting... │
-╰───────────────────┴───────────────┴──────────┴──────────────────┴────────────╯
-                           Request: Add user authentication
-  Phase: executing  │  Elapsed: 3m 42s  │  Active: 2  │  Done: 1  │  Failed: 0
-                                  Ctx: 57.3k/400.0k
-```
-
-### Workers View
-
-Live output from all workers (uses `capture-pane`, avoids tmux attach issues):
-
-```bash
-python3 ~/.claude/orchestrator_code/workers_view.py
-```
-
-**Workers View Output:**
-
-```
-WORKERS VIEW (Ctrl+C to exit)
-Found 3 worker sessions
-
-┌─────────────────────────────────┬─────────────────────────────────┐
-│ task-auth-service               │ task-auth-routes                │
-│                                 │                                 │
-│ Implementing login method...    │ Adding /login endpoint...       │
-│ ⠋ Writing src/services/auth.py │ ⠙ Reading contract interface    │
-│                                 │                                 │
-├─────────────────────────────────┴─────────────────────────────────┤
-│ task-user-model                                                   │
-│                                                                   │
-│ ✓ Task completed successfully                                     │
-│ Tests passed: 12/12                                               │
-│                                                                   │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-### Auto-Opening Monitoring Windows
-
-When `state.py init` runs, monitoring windows open automatically (macOS). Use `--no-monitoring` to disable:
-
-```
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  MAIN AGENT     │  │   DASHBOARD     │  │    WORKERS      │
-│                 │  │                 │  │ ┌─────┬───────┐ │
-│  Supervisor/    │  │ Task   Status   │  │ │wkr-a│ wkr-b │ │
-│  Planner runs   │  │ task-a ●running │  │ ├─────┼───────┤ │
-│  here           │  │ task-b ○pending │  │ │wkr-c│ wkr-d │ │
-│                 │  │                 │  │ └─────┴───────┘ │
-│  (your current  │  │ Ctx: 45k/200k   │  │  live output    │
-│   terminal)     │  │                 │  │  from workers   │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
-
-- **Main**: Your Claude Code session (supervisor/planner-architect)
-- **Dashboard**: Live status table with context window usage per worker
-- **Workers**: Split panes showing real-time output from each worker
-
-## How It Works
-
-### 1. Planning Phase
-
-The planner-architect:
-- Analyzes your codebase structure and patterns
-- Decomposes the request into independent, parallelizable tasks
-- Assigns file ownership (`files_write`) to prevent conflicts
-- Generates interface contracts for cross-task dependencies
-- Computes risk score for approval gate
-
-### 2. Execution Phase
-
-The supervisor:
-- **Pre-flight checks**: Dry-run dependency resolution (`uv sync --dry-run`, `npm install --dry-run`)
-- **Cleanup trap**: Registers signal handlers to clean up worktrees on exit/interrupt
-- Creates a **staging branch** from main (protects main from broken integrations)
-- Opens monitoring windows (Dashboard + Workers view)
-- Creates isolated git worktrees (`.worktrees/<task-id>/`)
-- Spawns worker agents in tmux sessions for true parallelism
-- **Non-blocking monitoring**: If one worker is blocked (needs dependency), continues monitoring healthy workers
-- Monitors progress via `.task-status.json` files
-
-### 3. Verification Phase (Two-Tier)
-
-The system uses a **two-tier verification** approach where each agent owns its merge decision:
-
-**Tier 1: Per-Task Verification (haiku)**
-1. Worker marks task `completed` in `.task-status.json`
-2. Supervisor spawns Verifier agent for THAT task
-3. Verifier checks:
-   - Task tests (pytest, npm test, etc.)
-   - File boundaries (only files in `files_write` modified)
-   - Contract versions consistency
-   - Environment hash matching
-   - **Contract type verification (REQUIRED)**: `mypy --strict` or equivalent to catch signature mismatches
-4. **If passed: Verifier merges task to staging** (atomic verify-then-merge)
-5. Verifier signals `.verified` (merged) or `.failed` (no merge)
-6. **Incremental integration check**: Supervisor runs full test suite on staging immediately
-   - If tests fail, we know exactly which task broke the build
-   - No need to wait for all tasks to find integration issues
-
-**Why contract type verification?** Unit tests might not catch type mismatches (e.g., `def auth(user: str)` vs `def auth(user: User)`). Static type checking catches these before integration.
-
-**Tier 2: Final Integration Check (sonnet)**
-After all tasks have `.verified` signals AND incremental checks passed:
-1. Integration-Checker checks out staging branch
-2. Runs full test suite (not just task-specific)
-3. Security scanning (bandit, npm audit, etc.)
-4. Type checking across all modified files
-5. **If passed: Integration-Checker merges staging to main**
-6. Signals `integration.passed` (main updated) or `integration.failed` (main untouched)
-
-**Why agents own merges:**
-- Atomic: No window between "verified" and "merged" where state could change
-- Clear ownership: Agent that validates makes the merge decision
-- Simpler Supervisor: Just spawns agents and waits for signals
-
-### 4. Review Phase (opus)
-
-After integration passes and staging is promoted to main:
-- Planner-architect (opus) reviews the integrated result holistically
-- Evaluates: Does implementation fulfill the request? Is architecture coherent?
-- Accept or iterate (max 3 iterations)
-- If max iterations reached → **Escalation Protocol**
-
-### 5. Escalation Protocol
-
-After max iterations (3) without successful review, orchestration cannot simply retry:
-
-1. **Pause**: Stop all retry attempts
-2. **Preserve state**: Keep staging branch, worktrees, and logs for debugging
-3. **Generate report**: `.orchestrator/escalation-report.md` with root cause analysis
-4. **Present options to user**:
-   - **Manual fix**: User fixes issues, runs `state.py resume`
-   - **Re-plan**: Generate new tasks.yaml with different decomposition
-   - **Abort**: Clean up everything, restore main to original commit
-
-**Why user decides:** Automatic rollback could discard valuable partial progress. Re-planning could repeat the same mistakes. Only the user has context to make the right call.
-
-## Task Specification Format
+The planner writes `tasks.yaml`. Each task lists the files it writes and reads, the logical resources it claims (for example `route:/auth` or `di:AuthService`), the tasks it depends on, and at least one verification command:
 
 ```yaml
-request: "Original user request"
-created_at: "2025-01-27T10:00:00Z"
-
 tasks:
   - id: task-auth-service
-    description: "Implement authentication service"
-    files_write:
-      - "src/services/auth.py"
-      - "tests/test_auth.py"
-    files_read:
-      - "src/models/user.py"
-    resources_write:
-      - "di:AuthService"
+    files_write: ["src/services/auth.py", "tests/test_auth.py"]
+    files_read: ["src/models/user.py"]
+    resources_write: ["di:AuthService"]
     depends_on: []
     verification:
       - command: "pytest tests/test_auth.py"
@@ -323,10 +86,8 @@ tasks:
         required: true
 
   - id: task-auth-routes
-    description: "Add authentication routes"
-    files_write:
-      - "src/routes/auth.py"
-    depends_on: [task-auth-service]  # Must wait for service
+    files_write: ["src/routes/auth.py"]
+    depends_on: [task-auth-service]
     verification:
       - command: "pytest tests/test_auth_routes.py"
         type: test
@@ -338,295 +99,175 @@ contracts:
     file_path: "contracts/auth_interface.py"
 ```
 
-## Key Concepts
+The complete example is [`docs/example-tasks.yaml`](docs/example-tasks.yaml). Before any agent starts:
 
-### File & Resource Ownership
+- `dag.py` rejects unknown dependency IDs and cycles, and prints the execution waves.
+- `conflict.py` reports two tasks that write the same file or claim the same resource, or one task that reads a file another writes, when no dependency orders them. It suggests the `depends_on` that would. Paths are compared as exact strings.
+- `risk.py` scores the plan. Above 25 the planner asks the user before the supervisor starts.
 
-Each task declares exclusive ownership of files:
-- `files_write` - Files this task will create/modify
-- `resources_write` - Logical resources (routes, DI bindings)
+A task with no verification command is invalid. `planner-architect.md` forbids it, `state.py init` rejects it and `verify.py` refuses to run it.
 
-Conflicts are detected at planning time. Overlapping ownership requires explicit `depends_on`.
+### Isolation with git worktrees
 
-### Interface Contracts
+For each task the supervisor runs `git worktree add -b task/<id> .worktrees/<id> main` and starts that task's worker inside the new directory, as a separate Claude Code process in its own tmux session. At most five workers run at once, started 15 seconds apart. A worker has its own checkout and branch, so it cannot edit another task's working files by accident.
 
-For cross-task dependencies:
+The isolation is by working directory, not by sandbox. Workers run with permissions bypassed, so the ownership rule is enforced afterwards, when the verifier compares what changed with `files_write`.
+
+### Interface contracts
+
+A contract is a `typing.Protocol` stub in `contracts/` that tasks agree on before any of them starts. Its header records a version: the short git hash of the repository when the contract was generated. This is `contracts/calculator_protocol.py`, one of the two demo contracts:
 
 ```python
-# contracts/auth_interface.py
 """
-Contract: AuthServiceProtocol
-Version: abc1234
+CalculatorProtocol - Interface contract for calculator module
+Version: 804534f
 """
 from typing import Protocol
 
-class AuthServiceProtocol(Protocol):
-    def login(self, username: str, password: str) -> dict:
-        """Returns {token: str, expires_at: datetime}"""
+
+class CalculatorProtocol(Protocol):
+    """Protocol defining the calculator interface."""
+
+    def add(self, a: float, b: float) -> float:
+        """Add two numbers and return the result."""
         ...
+
+    # subtract() omitted here
 ```
 
-Workers code against contracts. Max 2 renegotiations allowed.
+The demo modules `tests/e2e_demo/calculator.py` and `formatter.py` carry the same version in their docstrings.
 
-### Context Injection (Push-Based)
+Workers are told to read the contract instead of guessing a signature, and to record the contract name, version and methods they used in `.task-status.json`. The verifier is told to run `mypy --strict` (or pyright, or `tsc`) on any task that uses a contract. A signature mismatch is a `contract_mismatch` failure and blocks the merge. A contract may be renegotiated twice; a third change goes to the user.
 
-The Supervisor injects relevant project context directly into worker prompts, rather than workers pulling context at runtime:
+The version is recorded, not enforced by code. No script compares the version a worker recorded with the contract on disk. The type check and the renegotiation limit are instructions in `verifier.md` and `planner-architect.md`.
+
+### Verification and merging
+
+Each completed task gets its own verifier, a separate session from the worker. `verifier.md` has it:
+
+1. run the task's verification commands in the worktree (`verify.py commands`): in order, stopping at the first required failure, with a 300 second default timeout per command;
+2. check that every file changed in the task's last commit is listed in `files_write` and matches none of the forbidden patterns `node_modules/`, `__pycache__/`, `*.pyc`, `.git/`, `.env` and `*.lock` (`verify.py boundaries`);
+3. compare the environment hash, a hash of the project's lockfiles, with the value recorded at the start (`environment.py --verify`);
+4. type-check any contract the task used;
+5. if everything passes, merge `task/<id>` into `staging` and write `<task-id>.verified`; otherwise merge nothing and write `<task-id>.failed`.
+
+After every merge the supervisor runs `pytest -x` on `staging`, so a broken build is attributed to the task merged last. When all tasks are verified, the integration checker runs the full test suite, a security scan and a type check on `staging`, and moves `main` forward with `git merge --ff-only`. A failing test suite or a high-severity security finding blocks promotion; type and lint results are only reported. If a check fails, or `main` has moved so that a fast-forward is impossible, `main` is left untouched.
+
+A final review by the planner-architect accepts the result or sends it back, up to three iterations. After that the run stops and writes `.orchestrator/escalation-report.md`, and the user chooses between fixing by hand and resuming, re-planning, or aborting.
+
+## Try it
+
+### Planning scripts (no agents, no API calls)
+
+These need Python 3.10 or later and PyYAML. [`docs/example-tasks.yaml`](docs/example-tasks.yaml) has three tasks, two of which write `src/routes/auth.py` with no dependency between them.
+
+```console
+$ python3 .claude/orchestrator_code/dag.py docs/example-tasks.yaml
+Execution waves (2 waves):
+  Wave 1: task-auth-service, task-auth-refresh
+  Wave 2: task-auth-routes
+
+$ python3 .claude/orchestrator_code/conflict.py docs/example-tasks.yaml
+  [FILE_WRITE_WRITE] src/routes/auth.py
+    Tasks: task-auth-routes, task-auth-refresh
+    Fix: Add dependency: task-auth-refresh depends_on [task-auth-routes]
+
+$ python3 .claude/orchestrator_code/risk.py docs/example-tasks.yaml
+Risk Score: 80 (HIGH RISK)
+Auto-approve threshold: 25
+Factors:
+  - sensitive_path:src/services/auth.py:auth
+  - sensitive_path:tests/test_auth.py:auth
+  - sensitive_path:src/routes/auth.py:auth
+  - sensitive_path:src/routes/auth.py:auth
+```
+
+The output is abridged: the status lines that begin with a tick or a warning symbol are left out, and the order of tasks within a wave can vary between runs. `conflict.py` exits with status 1 when it finds a conflict. Adding the suggested `depends_on` clears it and turns the plan into three waves. Every path containing `auth` adds 20 to the risk score, which is why this small plan needs approval.
+
+### Full pipeline
+
+Requirements: the Claude Code CLI (`claude` on the PATH), git in a repository whose default branch is `main`, tmux, Python 3.10 or later with PyYAML, and optionally `rich` for the dashboard. macOS or Linux; the monitoring windows that `state.py init` opens are macOS only.
 
 ```bash
-# Supervisor looks up context and injects into prompt
-CONTEXT=$(python3 ~/.claude/orchestrator_code/context.py get-for-task task-auth --tasks-file tasks.yaml)
+git clone https://github.com/SynBioExplorer/Claude_Code_agentic_coding.git
+cd Claude_Code_agentic_coding
+mkdir -p ~/.claude/agents ~/.claude/skills
+cp .claude/agents/*.md ~/.claude/agents/   # overwrites agents of the same name
+cp -r .claude/orchestrator_code ~/.claude/
+cp -r .claude/skills/orchestrate ~/.claude/skills/
+python3 ~/.claude/orchestrator_code/tmux.py preflight
 ```
 
-Tasks can specify explicit context keys:
-```yaml
-tasks:
-  - id: task-auth-service
-    context_keys: ["auth-rules", "jwt-config"]  # Injected into worker prompt
-```
+The agent definitions call `python3 ~/.claude/orchestrator_code/...`, so the scripts must be installed there. `pyproject.toml` points at `src/claude_orchestrator`, which no longer exists, so the repository is not an installable package.
 
-This is better than pull-based because:
-- Workers don't waste tokens searching for context
-- Supervisor has global view of what's relevant
-- No risk of workers missing important context
-
-### Inter-Worker Mailbox
-
-Workers are isolated in separate git worktrees, but sometimes one worker's discoveries need to reach another mid-execution — an API signature change, a naming convention, or a new dependency installed by the Supervisor.
-
-The mailbox system provides push-based messaging between workers:
-
-- **Targeted messages**: Worker A sends directly to Worker B's inbox
-- **Broadcasts**: Supervisor or any worker sends to all workers at once
-
-**Use cases:**
-- Worker changes a function signature that another worker will consume via a contract
-- Supervisor installs a requested dependency and notifies all workers
-- Worker discovers a naming convention that others should follow
-
-**CLI examples:**
-
-```bash
-# Send a message to a specific worker
-python3 ~/.claude/orchestrator_code/mailbox.py send task-b "Changed login() return type" --from worker-task-a
-
-# Broadcast to all workers
-python3 ~/.claude/orchestrator_code/mailbox.py broadcast "Using UUID primary keys" --from supervisor
-
-# Check inbox (marks messages as read)
-python3 ~/.claude/orchestrator_code/mailbox.py check task-b
-
-# Peek at inbox (unread count only, no side effects)
-python3 ~/.claude/orchestrator_code/mailbox.py peek task-b
-```
-
-**Relationship to context injection:** Context injection (`context.py`) provides the initial state at worker spawn time — persistent project knowledge pulled into the prompt. The mailbox provides runtime updates during execution — ephemeral notifications pushed to inboxes as events happen.
-
-### Dependency Resolution (RFC Model)
-
-When workers discover missing dependencies, the Supervisor mediates:
+Then, in a Claude Code session inside the target repository:
 
 ```
-Worker → "I need pandas>=2.0" → Supervisor checks conflicts → User approves → Install → Restart worker
+/orchestrate Add user authentication with JWT tokens and a refresh flow
 ```
 
-1. **Worker signals blocked**: Writes `{"status": "blocked", "needs_dependency": "pandas>=2.0"}` to `.task-status.json`
-2. **Supervisor detects**: `python3 ~/.claude/orchestrator_code/tasks.py blocked`
-3. **Conflict check**: Supervisor checks for version conflicts with other workers
-4. **User approval**: Supervisor asks user before installing (security boundary)
-5. **Install & restart**: Supervisor installs, recomputes env hash, restarts worker
+The planner writes `tasks.yaml` and `contracts/` and reports the risk score. A plan scoring 25 or less starts without asking; a higher score waits for your approval. Workers, verifiers and the integration checker then run as separate `claude -p` processes with `--dangerously-skip-permissions`. Try it first on a disposable repository: a run starts several sessions and uses tokens accordingly. The supervisor's cleanup trap also calls `tmux kill-server` (`supervisor.md`, Stage 0), which ends every session on the default tmux server, not only the orchestrator's.
 
-The Supervisor is the only entity that can modify lockfiles. Workers request, Supervisor decides.
+Operational notes, script options and troubleshooting are in [`docs/reference.md`](docs/reference.md).
 
-### Risk Scoring
+## Agents
 
-| Factor | Weight |
-|--------|--------|
-| Sensitive paths (auth, security, crypto) | +20 |
-| Payment/billing paths | +25 |
-| Prod/deploy paths | +30 |
-| Many tasks (>5) | +5 per extra |
-| Many files (>10) | +3 per extra |
-| New dependencies | +3 per package |
-| Incomplete test coverage | +20 × (1 - coverage) |
+| Agent | Declared model | Started by | Role |
+|-------|----------------|------------|------|
+| `planner-architect` | opus | the `orchestrate` skill, as a subagent | Splits the request into tasks, writes contracts, gates on risk, starts the supervisor, and later reviews the result |
+| `supervisor` | sonnet | the planner, in tmux | Creates `staging` and the worktrees, starts and watches the other agents, runs the incremental test, cleans up. It has no Task tool |
+| `worker` | sonnet | the supervisor, in tmux | Implements one task in its worktree |
+| `verifier` | haiku | the supervisor, in tmux | Checks one task and merges it to `staging` if it passes |
+| `integration-checker` | sonnet | the supervisor, in tmux | Runs the full checks on `staging` and fast-forwards `main` |
 
-**Thresholds (default):**
-- **0-25**: Auto-approve
-- **26-50**: Recommend review
-- **51+**: Require approval
+The model is the `model:` line of each definition in `.claude/agents/`. `tmux.py` starts each tmux agent as `claude --dangerously-skip-permissions --permission-mode bypassPermissions -p` with the prompt on standard input. It passes neither `--agent` nor `--model`, so the role reaches the session through the prompt text, and the spawner does not select the definition's model or tool list.
 
-**Custom Configuration:**
+Each definition also carries rules aimed at the agent's own shortcuts: a test-first rule and a verification gate for workers, an output-reading rule for the verifier and integration checker (exit code 0 with "0 tests collected" is not a pass), tables of common rationalisations with rebuttals, and a three-strike limit on debugging. They are inspired by the [Superpowers](https://github.com/obra/superpowers) skills by Jesse Vincent.
 
-Sensitive patterns and thresholds can be customized via `.claude-agents.yaml`:
+## Design decisions
 
-```yaml
-risk:
-  sensitive_patterns:
-    - pattern: "auth|security|crypto"
-      weight: 20
-    - pattern: "internal/proprietary/*"
-      weight: 50
-  auto_approve_threshold: 30
-```
+These are recorded in the commit messages.
 
-Use with: `python3 ~/.claude/orchestrator_code/risk.py --config .claude-agents.yaml tasks.yaml`
+- **Remove tools instead of discouraging them.** With both the Task tool and tmux available, the supervisor "chose the easy path, bypassing worktrees and signal files", so the Task tool was removed from its tool list (`1339d9f`).
+- **The agent that verifies also merges.** This leaves no gap between "verified" and "merged" and gives the merge decision to the agent that holds the evidence (`b60af90`).
+- **A staging branch between tasks and `main`.** `main` moves only by fast-forward after the integration check, so a failed run leaves it deployable (`cdbeedb`).
+- **Headless sessions with permissions bypassed.** A supervisor nested inside the planner triggered a permission prompt for every Bash command, so it was moved into its own tmux session with permissions bypassed, like the workers (`14f36c4`). The plan and the after-the-fact checks are then the only controls.
 
-## Files Created During Orchestration
+## Limitations
+
+- **Evidence.** The history holds one recorded run: the calculator demo of 2026-01-29 (merge commits `0d8bac2`, `25f3a46`, `bb4d306`). It predates the staging branch, the tmux-started supervisor and the mailbox. Later commit messages describe an end-to-end audit and fixes, but the repository keeps no logs, plans or transcripts of any run.
+- **Tests.** Only `tests/e2e_demo` runs. `tests/unit` and `tests/integration` import `claude_orchestrator`, a package removed in `f7df662`. The scripts in `.claude/orchestrator_code/` have no tests.
+- **Contracts.** Versions are recorded, not compared (see above).
+- **Ownership check.** `verify.py boundaries` compares exact `files_write` strings with the files changed in the last commit of the task branch (`HEAD~1..HEAD`). Changes in earlier commits are not examined, and paths written as globs do not match. The churn and format-only checks in the specification are not implemented.
+- **Dependent tasks.** Worktrees are created from `main` (`supervisor.md`, Stage 1), while verified work is merged into `staging`. The definitions do not say how a task in a later wave receives the code of the tasks it depends on; the intended channel is the contract.
+- **Concurrency.** `verifier.md` and `supervisor.md` take the staging lock in a short `python3 -c` process, which releases it on exit, before the `git merge` it was meant to protect. `mailbox.py` finds `.orchestrator/mailbox` from the current directory and its command line has no project-directory option, while workers run inside `.worktrees/<id>`; unless a worker changes directory first, sender and recipient do not share a mailbox.
+- **Environment hash.** It is a hash of lockfiles and is the constant `no-lock` when the project has none, so the check cannot fail there.
+- **Language.** `contracts.py` emits Python `Protocol` stubs, and the supervisor's per-merge check is `pytest tests/ -x`; other ecosystems need those two places changed.
+- **Wiring and platform.** No agent definition runs `state.py init`, `monitoring.py` or `dashboard.py`, so the state file, the dashboard and the monitoring windows exist only if started by hand, although `SKILL.md` describes them as automatic. Monitoring windows use AppleScript (macOS only). Locking uses `fcntl` and risk scoring uses `SIGALRM`, so the scripts need a POSIX system.
+
+## Repository layout
 
 ```
-your-project/
-├── tasks.yaml                    # Execution plan
-├── contracts/                    # Interface Protocol stubs
-│   └── auth_interface.py
-├── .orchestration-state.json     # Execution state
-├── .orchestrator/
-│   ├── signals/                  # Worker signal files
-│   ├── logs/                     # Worker logs
-│   ├── prompts/                  # Generated worker prompts
-│   └── mailbox/                  # Inter-worker message inboxes
-│       ├── task-auth-service/
-│       ├── task-auth-routes/
-│       └── broadcast/
-└── .worktrees/                   # Isolated worktrees (temporary)
-    ├── task-auth-service/
-    │   └── .task-status.json
-    └── task-auth-routes/
-        └── .task-status.json
+.claude/agents/              five agent definitions
+.claude/skills/orchestrate/  the /orchestrate skill
+.claude/orchestrator_code/   standalone Python scripts called by the agents
+contracts/                   the two demo interface contracts
+tests/e2e_demo/              demo modules built in the recorded run, with tests
+tests/unit/, tests/integration/   tests for a removed package; they do not run
+templates/                   Jinja2 templates; nothing at HEAD references them
+docs/                        reference notes and the example plan
+ARCHITECTURE_8.md            design specification; parts are not implemented
+architecture.svg             overview figure of the same flow
+CLAUDE.md                    guidance for Claude Code sessions in this repository
+pyproject.toml               describes the removed package; not installable
 ```
 
-## Troubleshooting
+## Further reading
 
-### Resume interrupted orchestration
+- [`docs/reference.md`](docs/reference.md): scripts and options, task fields, risk scoring, monitoring, mailbox, dependency requests, resuming, troubleshooting.
+- [`ARCHITECTURE_8.md`](ARCHITECTURE_8.md): the design specification, including the parts that are not implemented.
+- [`architecture.svg`](architecture.svg): an overview figure of the same flow.
 
-If orchestration was interrupted (user stopped, crash, etc.):
+## Licence
 
-```bash
-# See what would be done (dry-run)
-python3 ~/.claude/orchestrator_code/state.py resume --dry-run
-
-# Actually resume
-python3 ~/.claude/orchestrator_code/state.py resume
-```
-
-This will:
-- Reset tasks stuck in "executing" to "pending"
-- Clean up incomplete worktrees and orphaned tmux sessions
-- Reopen monitoring windows
-- Report tasks ready for verification or merge
-
-Then continue from supervisor Stage 2 (spawn workers for pending tasks).
-
-### Check orchestration status
-```bash
-python3 ~/.claude/orchestrator_code/state.py status
-```
-
-### View monitoring windows
-```bash
-# Dashboard (runs directly, no tmux)
-python3 ~/.claude/orchestrator_code/dashboard.py
-
-# Workers view (uses capture-pane, avoids tmux attach crash on macOS/conda)
-python3 ~/.claude/orchestrator_code/workers_view.py
-```
-
-### List tmux worker sessions
-```bash
-tmux list-sessions | grep "worker-"
-```
-
-### View worker output
-```bash
-# Recommended: use capture-pane (no crash)
-tmux capture-pane -t "worker-<task-id>" -p | tail -30
-
-# Or use workers_view.py for live multi-pane view
-python3 ~/.claude/orchestrator_code/workers_view.py
-```
-
-### Handle blocked tasks (missing dependencies)
-
-If a worker discovers it needs a package that isn't installed:
-
-```bash
-# Check for blocked tasks
-python3 ~/.claude/orchestrator_code/tasks.py blocked
-
-# Or check specific task
-python3 ~/.claude/orchestrator_code/tmux.py check-blocked <task-id>
-```
-
-Output:
-```
-Task: task-data-analysis
-Reason: Missing required dependency
-Needs dependency: pandas>=2.0
-
-To resolve, install: pandas>=2.0
-Then restart orchestration.
-```
-
-The monitor command also detects blocked status automatically (exit code 2).
-
-**Why not auto-install?** Workers can't install dependencies mid-execution because:
-- It would break environment hash consistency
-- Security risk (arbitrary package installation)
-- Could cause version conflicts between workers
-
-### Kill stuck worker
-```bash
-tmux kill-session -t "worker-<task-id>"
-```
-
-### Clean up worktrees
-```bash
-git worktree list
-git worktree remove .worktrees/<task-id>
-```
-
-### Kill all orchestration sessions
-```bash
-# Kill all worker sessions
-tmux list-sessions -F '#{session_name}' | grep '^worker-' | xargs -I {} tmux kill-session -t {}
-
-# Clean up stale tmux socket (if server crashed)
-rm -f /private/tmp/tmux-$(id -u)/default
-```
-
-### tmux "server exited unexpectedly" (macOS with conda only)
-
-This error **only affects conda's tmux package** on macOS. It's a bug in how conda builds/packages tmux, not tmux itself.
-
-**Solution:** Use the official tmux binary instead of conda's:
-
-```bash
-# Check which tmux you're using
-which tmux
-# If it shows /opt/miniconda3/bin/tmux or similar conda path, that's the problem
-
-# Fix options (choose one):
-brew install tmux                    # Homebrew
-sudo port install tmux               # MacPorts
-# Or compile from source: https://github.com/tmux/tmux
-```
-
-After installing, ensure the non-conda tmux is first in your PATH, or use the full path.
-
-**Workaround (if you must use conda's tmux):**
-
-```bash
-# Use capture-pane instead of attach:
-tmux capture-pane -t worker-task-a -p  # ✓ works
-
-# Or use the workers view:
-python3 ~/.claude/orchestrator_code/workers_view.py  # ✓ works
-```
-
-## License
-
-MIT
-
-## See Also
-
-- [ARCHITECTURE_8.md](ARCHITECTURE_8.md) - Full architecture specification
-- [.claude/agents/](.claude/agents/) - Agent definitions
-- [.claude/orchestrator_code/](.claude/orchestrator_code/) - Utility scripts
+MIT.
