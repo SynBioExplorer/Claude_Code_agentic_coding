@@ -77,13 +77,19 @@ def detect_conflicts(tasks: list) -> list:
                 return True
         return False
 
-    def tasks_ordered(task_ids):
-        """Check if tasks have explicit ordering via dependencies."""
+    def unordered_group(task_ids):
+        """Return task_ids with the first two unordered tasks moved to the front, or None.
+
+        Two tasks are ordered when one depends on the other, directly or through other
+        tasks. A group is safe only if every pair in it is ordered. A task listed twice
+        is ordered with itself. The unordered pair comes first because suggest_fix makes
+        the second task depend on the first.
+        """
         for i, t1 in enumerate(task_ids):
             for t2 in task_ids[i+1:]:
-                if has_dependency_path(t1, t2) or has_dependency_path(t2, t1):
-                    return True
-        return False
+                if t1 != t2 and not (has_dependency_path(t1, t2) or has_dependency_path(t2, t1)):
+                    return [t1, t2] + [t for t in task_ids if t not in (t1, t2)]
+        return None
 
     # Collect writes and reads
     for task in tasks:
@@ -100,8 +106,9 @@ def detect_conflicts(tasks: list) -> list:
 
     # Check write-write file conflicts
     for file, writers in file_writes.items():
-        if len(writers) > 1 and not tasks_ordered(writers):
-            conflicts.append({"type": "file_write_write", "target": file, "tasks": writers})
+        group = unordered_group(writers)
+        if group:
+            conflicts.append({"type": "file_write_write", "target": file, "tasks": group})
 
     # Check read-write file conflicts (concurrent tasks)
     for file, writers in file_writes.items():
@@ -110,21 +117,23 @@ def detect_conflicts(tasks: list) -> list:
             if reader in writers:
                 continue  # Same task reading and writing its own file is fine
             # Check if the reader and any writer are concurrent (no ordering)
-            concurrent_writers = [w for w in writers if w != reader]
+            concurrent_writers = [
+                w for w in writers if w != reader and unordered_group([reader, w])
+            ]
             if concurrent_writers:
                 pair = [reader] + concurrent_writers
-                if not tasks_ordered(pair):
-                    conflicts.append({
-                        "type": "file_read_write",
-                        "target": file,
-                        "tasks": pair,
-                        "detail": f"{reader} reads while {concurrent_writers} write"
-                    })
+                conflicts.append({
+                    "type": "file_read_write",
+                    "target": file,
+                    "tasks": pair,
+                    "detail": f"{reader} reads while {concurrent_writers} write"
+                })
 
     # Check resource conflicts
     for resource, writers in resource_writes.items():
-        if len(writers) > 1 and not tasks_ordered(writers):
-            conflicts.append({"type": "resource", "target": resource, "tasks": writers})
+        group = unordered_group(writers)
+        if group:
+            conflicts.append({"type": "resource", "target": resource, "tasks": group})
 
     return conflicts
 
