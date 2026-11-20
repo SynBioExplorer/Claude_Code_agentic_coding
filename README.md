@@ -2,7 +2,7 @@
 
 Coordinates several Claude Code agents working on one repository at the same time. A planner agent splits a request into tasks that declare the files they own and the tasks they depend on. The design runs each task in its own git worktree against interface contracts fixed before the work starts, verifies each finished task before merging it into a staging branch, and checks the integrated result before it reaches `main`. The aim is that parallel changes merge without collisions.
 
-This is a prototype made of Claude Code agent definitions, one skill and standalone Python scripts. It is not packaged, and the scripts have no automated tests. [Status](#status) separates what the scripts implement, what exists only in the agent definitions, and what is design only.
+This is a prototype made of Claude Code agent definitions, one skill and standalone Python scripts. It is not packaged, and only one script, `conflict.py`, has automated tests. [Status](#status) separates what the scripts implement, what exists only in the agent definitions, and what is design only.
 
 ## The problem
 
@@ -48,7 +48,7 @@ The Execute and Integrate stages follow `supervisor.md`. The planner-architect r
 | Part | At HEAD | Notes |
 |------|---------|-------|
 | Plan validation: unknown dependencies, cycles, execution waves | Implemented | `dag.py` |
-| Collision detection on files and resources | Implemented, with a gap | `conflict.py`; see [Limitations](#limitations) |
+| Collision detection on files and resources | Implemented | `conflict.py` |
 | Risk score and approval threshold | Implemented | `risk.py` |
 | Contract stub generation, stamped with the git hash | Implemented | `contracts.py` |
 | Contract version comparison | Not implemented | The version is recorded, never compared |
@@ -112,7 +112,7 @@ contracts:
 The complete example is [`docs/example-tasks.yaml`](docs/example-tasks.yaml). Before any agent starts:
 
 - `dag.py` rejects unknown dependency IDs and cycles, and prints the execution waves.
-- `conflict.py` groups the tasks that write each path, the tasks that read a path another task writes, and the tasks that claim each resource. It reports a group when no two of its tasks are linked by a chain of `depends_on`, and suggests making the second task depend on the first. Paths are compared as exact strings.
+- `conflict.py` reports a path when a task that writes it is not linked by a chain of `depends_on` to another task that writes or reads it, and a resource when two tasks that claim it are not linked. It lists the tasks involved, starting with an unlinked pair, and suggests making the second of that pair depend on the first. Paths are compared as exact strings.
 - `risk.py` scores the plan. Above 25 the planner definition says to ask the user before starting the supervisor.
 
 A task with no verification command is invalid. `planner-architect.md` forbids it, `state.py init` rejects it and `verify.py` refuses to run it.
@@ -233,9 +233,8 @@ The definitions also carry rules aimed at the agents' own shortcuts: a test-firs
 ## Limitations
 
 - **Evidence.** The history holds one recorded run: the calculator demo of 2026-01-29 (merge commits `0d8bac2`, `25f3a46`, `bb4d306`). It predates the staging branch, the tmux-started supervisor, the mailbox and `f7df662`, which removed `--agent worker` from the spawn command in `supervisor.md`. Later commit messages record problems seen while the pipeline was run: the supervisor bypassing worktrees while it had the Task tool (`1339d9f`), false-positive process checks and permission prompts from compound Bash commands (`2d9b3d7`), and a permission prompt for every Bash command in the nested supervisor (`14f36c4`). The repository keeps no logs, plans or transcripts of those runs.
-- **Tests.** Only `tests/e2e_demo` runs. `tests/unit` and `tests/integration` import `claude_orchestrator`, a package removed in `f7df662`. The scripts in `.claude/orchestrator_code/` have no tests.
+- **Tests.** Only `tests/e2e_demo` and `tests/orchestrator` run. `tests/unit` and `tests/integration` import `claude_orchestrator`, a package removed in `f7df662`. Of the scripts in `.claude/orchestrator_code/`, only `conflict.py` has tests.
 - **Contracts.** Versions are recorded, not compared (see above).
-- **Collision check.** `conflict.py` treats a group of tasks as ordered when any two of them are linked by `depends_on`. With three tasks writing one file and only two of them ordered, it reports nothing, and `dag.py` can put the third in the same wave as one of the others.
 - **Ownership check.** `verify.py boundaries` compares exact `files_write` strings with the files changed in the last commit of the task branch (`HEAD~1..HEAD`). Changes in earlier commits are not examined, and paths written as globs do not match. The churn and format-only checks in the specification are not implemented.
 - **Dependent tasks and plan files.** Worktrees are created from `main` (`supervisor.md`, Stage 1), while verified work is merged into `staging`. The definitions do not say how a task in a later wave receives the code of the tasks it depends on; the intended channel is the contract. But the planner writes `tasks.yaml` and `contracts/` to the working tree and no definition commits them, so a worktree created from `main` does not contain them unless they were committed first.
 - **Review timing.** `supervisor.md` removes each worktree after its incremental check (Stage 4), deletes `staging` after promotion (Stage 6) and only then starts the review (Stage 7). A rejected review therefore finds `main` already moved, and `staging` and the worktrees, which the escalation protocol says to keep, already gone.
@@ -252,6 +251,7 @@ The definitions also carry rules aimed at the agents' own shortcuts: a test-firs
 .claude/orchestrator_code/   standalone Python scripts called by the agents
 contracts/                   the two demo interface contracts
 tests/e2e_demo/              demo modules built in the recorded run, with tests
+tests/orchestrator/          tests for conflict.py
 tests/unit/, tests/integration/   tests for a removed package; they do not run
 templates/                   Jinja2 templates; nothing at HEAD references them
 docs/                        reference notes and the example plan
