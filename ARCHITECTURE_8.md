@@ -1,5 +1,7 @@
 # Claude Code Multi-Agent Orchestration System
 
+> **Status note.** This is the design specification, and parts of it are not implemented at HEAD: structured patch intents, framework adapters and region markers, churn and format-only boundary checks, `files_append`, `{modified_tests}` resolution, contract version comparison, and the `.claude-agents.yaml` sections other than the one `risk.py` reads (`risk:`, which this document calls `approval:`). Some of these existed as the Python package `src/claude_orchestrator/`, which was removed in commit `f7df662`. Where this document and the agent definitions in `.claude/agents/` disagree, the definitions describe the current behaviour: the verifier model is `haiku`, the verifier merges each task into a `staging` branch, and the integration checker fast-forwards `main`. The sections that say "Unchanged from ARCHITECTURE_6.md" refer to a file that is not in the repository. The [README](README.md#status) has the current status.
+
 ## Architecture Overview
 
 A coordinated multi-agent system for Claude Code that enables parallel task execution with intelligent dependency management, git worktree isolation, and automated review cycles.
