@@ -1,0 +1,52 @@
+# Example plan for the planning scripts. It was written by hand and is not the
+# output of a real run.
+#
+# task-auth-refresh is a deliberate collision: it writes src/routes/auth.py, as
+# task-auth-routes does, and neither task depends on the other, so conflict.py
+# reports it. Adding "depends_on: [task-auth-routes]" to task-auth-refresh
+# resolves it.
+request: "Add user authentication with JWT tokens and refresh flow"
+created_at: "2026-01-27T10:00:00Z"
+
+tasks:
+  - id: task-auth-service
+    description: "Implement authentication service"
+    files_write:
+      - "src/services/auth.py"
+      - "tests/test_auth.py"
+    files_read:
+      - "src/models/user.py"
+    resources_write:
+      - "di:AuthService"
+    depends_on: []
+    verification:
+      - command: "pytest tests/test_auth.py"
+        type: test
+        required: true
+
+  - id: task-auth-routes
+    description: "Add authentication routes"
+    files_write:
+      - "src/routes/auth.py"
+    depends_on: [task-auth-service]
+    verification:
+      - command: "pytest tests/test_auth_routes.py"
+        type: test
+        required: true
+
+  - id: task-auth-refresh
+    description: "Add the token refresh endpoint"
+    files_write:
+      - "src/routes/auth.py"
+    depends_on: []
+    verification:
+      - command: "pytest tests/test_auth_refresh.py"
+        type: test
+        required: true
+
+contracts:
+  - name: "AuthServiceProtocol"
+    version: "abc1234"
+    file_path: "contracts/auth_interface.py"
+    methods: ["login", "logout", "verify"]
+    consumers: ["task-auth-routes"]
