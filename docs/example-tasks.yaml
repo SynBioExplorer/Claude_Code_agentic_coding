@@ -1,52 +1,55 @@
 # Example plan for the planning scripts. It was written by hand and is not the
-# output of a real run.
+# output of a real run. No path matches a sensitive pattern in risk.py and every
+# task has a test, so the plan scores 0 and would start without approval.
 #
-# task-auth-refresh is a deliberate collision: it writes src/routes/auth.py, as
-# task-auth-routes does, and neither task depends on the other, so conflict.py
-# reports it. Adding "depends_on: [task-auth-routes]" to task-auth-refresh
+# task-since-filter is a deliberate collision: it writes src/cli.py, as
+# task-export-command does, and neither task depends on the other, so conflict.py
+# reports it. Adding "depends_on: [task-export-command]" to task-since-filter
 # resolves it.
-request: "Add user authentication with JWT tokens and refresh flow"
+request: "Add a CSV export command with a --since filter"
 created_at: "2026-01-27T10:00:00Z"
 
 tasks:
-  - id: task-auth-service
-    description: "Implement authentication service"
+  - id: task-csv-writer
+    description: "Implement the CSV writer"
     files_write:
-      - "src/services/auth.py"
-      - "tests/test_auth.py"
+      - "src/export/csv_writer.py"
+      - "tests/test_csv_writer.py"
     files_read:
-      - "src/models/user.py"
+      - "src/models/record.py"
     resources_write:
-      - "di:AuthService"
+      - "di:CsvWriter"
     depends_on: []
     verification:
-      - command: "pytest tests/test_auth.py"
+      - command: "pytest tests/test_csv_writer.py"
         type: test
         required: true
 
-  - id: task-auth-routes
-    description: "Add authentication routes"
+  - id: task-export-command
+    description: "Add the export command to the CLI"
     files_write:
-      - "src/routes/auth.py"
-    depends_on: [task-auth-service]
+      - "src/cli.py"
+      - "tests/test_cli_export.py"
+    depends_on: [task-csv-writer]
     verification:
-      - command: "pytest tests/test_auth_routes.py"
+      - command: "pytest tests/test_cli_export.py"
         type: test
         required: true
 
-  - id: task-auth-refresh
-    description: "Add the token refresh endpoint"
+  - id: task-since-filter
+    description: "Add a --since option to the export command"
     files_write:
-      - "src/routes/auth.py"
+      - "src/cli.py"
+      - "tests/test_cli_since.py"
     depends_on: []
     verification:
-      - command: "pytest tests/test_auth_refresh.py"
+      - command: "pytest tests/test_cli_since.py"
         type: test
         required: true
 
 contracts:
-  - name: "AuthServiceProtocol"
+  - name: "CsvWriterProtocol"
     version: "abc1234"
-    file_path: "contracts/auth_interface.py"
-    methods: ["login", "logout", "verify"]
-    consumers: ["task-auth-routes"]
+    file_path: "contracts/csv_writer_interface.py"
+    methods: ["write_rows", "close"]
+    consumers: ["task-export-command"]

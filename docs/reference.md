@@ -1,6 +1,6 @@
 # Reference
 
-Operational detail behind the [README](../README.md). It describes the scripts and agent definitions at HEAD. Paths such as `~/.claude/orchestrator_code/` assume the install steps in the README. Most scripts read `tasks.yaml`, `.orchestrator/` and `.worktrees/` relative to the current directory, so run them from the project root.
+Operational detail behind the [README](../README.md). It describes the scripts and agent definitions at HEAD. Where it describes what an agent does, it describes the definition: only the planner-architect receives its definition at run time, because `tmux.py` starts the other agents without `--agent`. Paths such as `~/.claude/orchestrator_code/` assume the install steps in the README. Most scripts read `tasks.yaml`, `.orchestrator/` and `.worktrees/` relative to the current directory, so run them from the project root.
 
 ## Scripts
 
@@ -80,7 +80,7 @@ risk:
   auto_approve_threshold: 30
 ```
 
-Patterns with nested quantifiers are rejected, and each match has a one-second alarm.
+A pattern with two adjacent quantifier characters, such as `a++` or `.*+`, is rejected. Nested groups such as `(a+)+` are not, so the real protection is the one-second `SIGALRM` around each match, which interrupts a runaway search.
 
 ## Monitoring
 
@@ -111,7 +111,9 @@ By default no package is installed without asking, because mid-run installs woul
 
 ## Escalation
 
-After three review iterations without acceptance, or on an unrecoverable error or a third contract renegotiation, the planner stops. It keeps the `staging` branch, the `.worktrees/` directories and `.orchestrator/logs/`, writes `.orchestrator/escalation-report.md` with a root-cause analysis, and offers three options: fix by hand and run `state.py resume`, re-plan with a different decomposition, or abort, which deletes `staging` and prunes worktrees. The user decides, because automatic rollback could discard useful partial work and re-planning could repeat the same mistake.
+`planner-architect.md` describes an escalation after three review iterations without acceptance, an unrecoverable error, a third contract renegotiation, or integration tests that keep failing: keep the `staging` branch, the `.worktrees/` directories and `.orchestrator/logs/`, write `.orchestrator/escalation-report.md` with a root-cause analysis, and offer three options: fix by hand and run `state.py resume`, re-plan with a different decomposition, or abort, which deletes `staging` and prunes worktrees. The user decides, because automatic rollback could discard useful partial work and re-planning could repeat the same mistake.
+
+This escalation is not wired at HEAD. The review runs in Stage 7 of `supervisor.md`, in a tmux session that does not receive `planner-architect.md`, and by then Stage 4 has removed the worktrees and Stage 6 has deleted `staging`.
 
 ## Resuming and status
 
