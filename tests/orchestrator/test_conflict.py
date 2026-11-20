@@ -1,8 +1,9 @@
 """Tests for .claude/orchestrator_code/conflict.py.
 
 They need only pytest and the standard library. The script is not in an importable
-package, so this module loads it by path. The directory has no __init__.py, so pytest
-imports this file as a top-level module and never imports tests/unit or tests/integration.
+package, so this module loads it by path. The directory has no __init__.py, so
+`pytest tests/orchestrator` imports this file as a top-level module and does not touch
+tests/unit or tests/integration. A bare `pytest` still stops at their collection errors.
 """
 
 import importlib.util
@@ -92,6 +93,19 @@ def test_task_claiming_a_resource_twice_does_not_conflict_with_itself():
 def test_task_claiming_a_resource_twice_is_ordered_before_a_dependent_task():
     plan = [task("a", **CLAIMED_TWICE), task("b", ["a"], resources_write=["route:/api"])]
     assert conflict.detect_conflicts(plan) == []
+
+
+def test_task_listing_a_file_twice_does_not_conflict_with_itself():
+    assert conflict.detect_conflicts([task("a", files_write=["shared.py", "shared.py"])]) == []
+
+
+def test_task_that_reads_and_writes_a_file_conflicts_only_as_a_writer():
+    plan = [
+        task("a", files_read=["shared.py"], files_write=["shared.py"]),
+        task("b", files_write=["shared.py"]),
+    ]
+    found = [(c["type"], c["tasks"]) for c in conflict.detect_conflicts(plan)]
+    assert found == [("file_write_write", ["a", "b"])]
 
 
 # Task "r" reads shared.py and the tasks named in writers write it. edges and expected

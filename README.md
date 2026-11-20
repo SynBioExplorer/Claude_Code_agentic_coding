@@ -64,7 +64,7 @@ The Execute and Integrate stages follow `supervisor.md`. The planner-architect r
 | Churn and format-only checks, `files_append`, `{modified_tests}` | Design only | `ARCHITECTURE_8.md` |
 | `.claude-agents.yaml` sections other than `risk:` | Design only | `ARCHITECTURE_8.md` |
 
-`pytest tests/e2e_demo` passes (44 tests), but it covers only the three demo modules in that directory. `tests/unit` and `tests/integration` import a package that was removed and fail at collection. The git history holds one recorded exercise of the pipeline, a three-module calculator demo; see [Limitations](#limitations).
+`pytest tests/e2e_demo tests/orchestrator` passes (81 tests): 44 cover the three demo modules and 37 cover `conflict.py`. Name both directories: a bare `pytest` stops at collection, because `tests/unit` and `tests/integration` import a package that was removed. The git history holds one recorded exercise of the pipeline, a three-module calculator demo; see [Limitations](#limitations).
 
 ## Design decisions
 
